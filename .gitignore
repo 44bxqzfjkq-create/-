@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+
+# Data & outputs (generated at runtime).
+# NOTE: data/sample/ is intentionally committed (bundled demo dataset).
+data/raw/
+data/processed/
+data/cache/
+data/metadata/
+reports/*
+!reports/.gitkeep
+
+# OS
+.DS_Store

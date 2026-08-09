@@ -1,0 +1,58 @@
+{
+  "7203": {
+    "name": "トヨタ自動車",
+    "sector": "輸送用機器",
+    "market": "プライム",
+    "accounting_standard": "IFRS",
+    "shares_outstanding": 13000000000
+  },
+  "6758": {
+    "name": "ソニーグループ",
+    "sector": "電気機器",
+    "market": "プライム",
+    "accounting_standard": "IFRS",
+    "shares_outstanding": 1250000000
+  },
+  "6861": {
+    "name": "キーエンス",
+    "sector": "電気機器",
+    "market": "プライム",
+    "accounting_standard": "日本基準",
+    "shares_outstanding": 243000000
+  },
+  "9984": {
+    "name": "ソフトバンクグループ",
+    "sector": "情報・通信業",
+    "market": "プライム",
+    "accounting_standard": "IFRS",
+    "shares_outstanding": 1450000000
+  },
+  "8306": {
+    "name": "三菱UFJフィナンシャル・グループ",
+    "sector": "銀行業",
+    "market": "プライム",
+    "accounting_standard": "日本基準",
+    "shares_outstanding": 12200000000
+  },
+  "4568": {
+    "name": "第一三共",
+    "sector": "医薬品",
+    "market": "プライム",
+    "accounting_standard": "IFRS",
+    "shares_outstanding": 1940000000
+  },
+  "9433": {
+    "name": "KDDI",
+    "sector": "情報・通信業",
+    "market": "プライム",
+    "accounting_standard": "IFRS",
+    "shares_outstanding": 2200000000
+  },
+  "6098": {
+    "name": "リクルートホールディングス",
+    "sector": "サービス業",
+    "market": "プライム",
+    "accounting_standard": "IFRS",
+    "shares_outstanding": 1580000000
+  }
+}

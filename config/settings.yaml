@@ -1,0 +1,67 @@
+# ============================================================
+#  株式分析システム 設定ファイル
+#  （コードを変えずに、この YAML を編集して挙動を調整します）
+# ============================================================
+
+# データ取得プロバイダ:
+#   sample   … 同梱のデモ用データ（オフラインで動く。合成データ）
+#   yfinance … Yahoo Finance から実データ取得（要ネットワーク。銘柄コードは 7203.T 形式）
+provider: sample
+
+# データ・レポートの保存先
+paths:
+  data_dir: data
+  reports_dir: reports
+
+# 分析対象ユニバース（銘柄コード）
+# sample プロバイダでは以下がデモデータとして用意されています。
+universe:
+  - "7203"   # トヨタ自動車
+  - "6758"   # ソニーグループ
+  - "6861"   # キーエンス
+  - "9984"   # ソフトバンクグループ
+  - "8306"   # 三菱UFJフィナンシャル・グループ
+  - "4568"   # 第一三共
+  - "9433"   # KDDI
+  - "6098"   # リクルートホールディングス
+
+# 総合スコアの重み（合計は自動正規化されます）
+# 各分析モジュールの出力（0〜100）を重み付き平均します。
+weights:
+  performance: 1.5
+  earnings: 1.0
+  financials: 1.5
+  valuation: 2.0
+  growth: 1.5
+  price_action: 1.0
+  market_expectation: 0.5
+  # hypothesis / counter_analysis / risk / investor_views は
+  # 文章所見＋ペナルティ/加点として総合に反映（下記参照）
+  risk_penalty_weight: 1.0        # リスクスコアが低い(=危険)ほど総合を減点
+  counter_penalty_weight: 0.5     # 反証が強いほど総合を減点
+
+# スクリーニング条件（プリセット）
+# 各条件は「指標名 op 閾値」。op は >= <= > < == のいずれか。
+screening:
+  presets:
+    value_growth:            # 割安 × 成長
+      label: "割安×成長"
+      rules:
+        - "per <= 25"
+        - "revenue_cagr_3y >= 5"
+        - "equity_ratio >= 40"
+        - "roe >= 8"
+    quality_dividend:        # 高配当 × 健全
+      label: "高配当×財務健全"
+      rules:
+        - "dividend_yield >= 2.5"
+        - "equity_ratio >= 50"
+        - "roe >= 8"
+    default:
+      label: "総合スコア上位"
+      rules:
+        - "total_score >= 55"
+
+  # 除外条件（満たすと候補から除外）
+  exclude:
+    - "equity_ratio < 10"    # 財務が極端に脆弱

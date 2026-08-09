@@ -1,0 +1,7 @@
+# Core (required)
+pandas>=2.0
+PyYAML>=6.0
+
+# Live data provider (optional — needed only for `--provider yfinance`).
+# The bundled `sample` provider works with no extra dependencies.
+yfinance>=0.2.40
