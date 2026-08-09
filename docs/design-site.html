@@ -1,0 +1,684 @@
+<title>株式分析システム 設計書</title>
+<style>
+  :root {
+    --bg: #F1F4F2;
+    --surface: #FFFFFF;
+    --surface-2: #E9EDEB;
+    --surface-3: #F5F8F6;
+    --ink: #15211D;
+    --ink-2: #47544F;
+    --ink-3: #6C7975;
+    --border: #DBE2DE;
+    --border-strong: #C4CEC9;
+    --accent: #0F6E5C;
+    --accent-ink: #0B5344;
+    --accent-soft: #E1EFE9;
+    --good: #1E7A4E;
+    --good-soft: #E3F1E8;
+    --warn: #9C6712;
+    --warn-soft: #F6EBD5;
+    --crit: #A83A3A;
+    --crit-soft: #F5E1E1;
+    --info: #2C5E93;
+    --info-soft: #E2EAF3;
+    --shadow: 0 1px 2px rgba(21,33,29,.04), 0 8px 24px rgba(21,33,29,.06);
+    --serif: "Yu Mincho", "YuMincho", "Hiragino Mincho ProN", "Hiragino Mincho Pro", "Songti SC", Georgia, serif;
+    --sans: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic", "YuGothic", "Noto Sans JP", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --mono: "SFMono-Regular", "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0D1512;
+      --surface: #16201C;
+      --surface-2: #1E2A25;
+      --surface-3: #131D19;
+      --ink: #E7ECE9;
+      --ink-2: #AEBAB4;
+      --ink-3: #7F8D87;
+      --border: #273531;
+      --border-strong: #35453F;
+      --accent: #4FC0A4;
+      --accent-ink: #7FD6BF;
+      --accent-soft: #143029;
+      --good: #5CBE86;
+      --good-soft: #16302169;
+      --warn: #D6A24E;
+      --warn-soft: #33280f69;
+      --crit: #DE7D7D;
+      --crit-soft: #33191969;
+      --info: #7CA8D8;
+      --info-soft: #16233369;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 10px 30px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0D1512;
+    --surface: #16201C;
+    --surface-2: #1E2A25;
+    --surface-3: #131D19;
+    --ink: #E7ECE9;
+    --ink-2: #AEBAB4;
+    --ink-3: #7F8D87;
+    --border: #273531;
+    --border-strong: #35453F;
+    --accent: #4FC0A4;
+    --accent-ink: #7FD6BF;
+    --accent-soft: #143029;
+    --good: #5CBE86;
+    --good-soft: #16302169;
+    --warn: #D6A24E;
+    --warn-soft: #33280f69;
+    --crit: #DE7D7D;
+    --crit-soft: #33191969;
+    --info: #7CA8D8;
+    --info-soft: #16233369;
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 10px 30px rgba(0,0,0,.35);
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.75;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* ---------- Layout shell ---------- */
+  .shell { display: grid; grid-template-columns: 288px minmax(0, 1fr); max-width: 1240px; margin: 0 auto; }
+  .sidebar {
+    position: sticky; top: 0; align-self: start; height: 100vh; overflow-y: auto;
+    border-right: 1px solid var(--border); padding: 28px 22px 40px;
+  }
+  .content { min-width: 0; padding: 0 clamp(20px, 4vw, 64px) 120px; }
+
+  /* ---------- Sidebar ---------- */
+  .brand { display: flex; align-items: center; gap: 11px; margin-bottom: 26px; }
+  .brand-mark {
+    width: 34px; height: 34px; border-radius: 8px; flex: none;
+    background: var(--accent); color: #fff; display: grid; place-items: center;
+    font-family: var(--mono); font-weight: 700; font-size: 15px; letter-spacing: -.5px;
+  }
+  .brand-name { font-family: var(--serif); font-size: 15px; font-weight: 600; letter-spacing: .02em; line-height: 1.3; }
+  .brand-sub { font-size: 11px; color: var(--ink-3); letter-spacing: .12em; text-transform: uppercase; }
+  .toc-label { font-size: 11px; letter-spacing: .16em; text-transform: uppercase; color: var(--ink-3); margin: 0 0 10px 8px; }
+  .toc { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+  .toc a {
+    display: flex; gap: 10px; align-items: baseline; text-decoration: none; color: var(--ink-2);
+    font-size: 13.5px; padding: 6px 10px; border-radius: 7px; border-left: 2px solid transparent;
+    transition: background .15s, color .15s;
+  }
+  .toc a:hover { background: var(--surface-2); color: var(--ink); }
+  .toc a.active { background: var(--accent-soft); color: var(--accent-ink); border-left-color: var(--accent); font-weight: 600; }
+  .toc a .n { font-family: var(--mono); font-size: 11.5px; color: var(--ink-3); flex: none; width: 20px; }
+  .toc a.active .n { color: var(--accent); }
+
+  /* ---------- Hero ---------- */
+  .hero { padding: 56px 0 20px; border-bottom: 1px solid var(--border); margin-bottom: 8px; }
+  .eyebrow { font-size: 12px; letter-spacing: .2em; text-transform: uppercase; color: var(--accent); font-weight: 600; margin-bottom: 14px; }
+  h1 { font-family: var(--serif); font-weight: 600; font-size: clamp(30px, 5vw, 46px); line-height: 1.18; letter-spacing: .01em; margin: 0 0 16px; text-wrap: balance; }
+  .lede { font-size: 17px; color: var(--ink-2); max-width: 62ch; margin: 0 0 26px; line-height: 1.7; }
+  .meta { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 7px; padding: 6px 12px; border-radius: 999px;
+    background: var(--surface); border: 1px solid var(--border); font-size: 12.5px; color: var(--ink-2);
+  }
+  .chip b { color: var(--ink); font-weight: 600; }
+  .chip .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex: none; }
+  .chip.status .dot { background: var(--warn); }
+
+  /* ---------- Sections & typography ---------- */
+  section { padding-top: 40px; scroll-margin-top: 20px; }
+  .sec-head { display: flex; align-items: baseline; gap: 14px; margin-bottom: 6px; }
+  .sec-num { font-family: var(--mono); font-size: 13px; color: var(--accent); font-weight: 600; padding-top: 4px; }
+  h2 { font-family: var(--serif); font-weight: 600; font-size: clamp(22px, 3vw, 29px); line-height: 1.3; margin: 0; letter-spacing: .01em; text-wrap: balance; }
+  .sec-tag { font-size: 12px; color: var(--ink-3); margin: 2px 0 20px 40px; }
+  h3 { font-family: var(--sans); font-weight: 700; font-size: 16.5px; margin: 30px 0 12px; letter-spacing: .01em; }
+  p { margin: 0 0 14px; max-width: 68ch; }
+  a.inline { color: var(--accent-ink); }
+  strong { font-weight: 700; color: var(--ink); }
+  .lead-p { font-size: 16.5px; color: var(--ink-2); max-width: 66ch; }
+
+  /* ---------- Cards ---------- */
+  .grid { display: grid; gap: 14px; }
+  .g2 { grid-template-columns: repeat(2, 1fr); }
+  .g3 { grid-template-columns: repeat(3, 1fr); }
+  .card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 18px 20px;
+    box-shadow: var(--shadow);
+  }
+  .card h4 { margin: 0 0 6px; font-size: 15px; font-weight: 700; display: flex; align-items: center; gap: 9px; }
+  .card p { font-size: 14px; color: var(--ink-2); margin: 0; }
+  .card .idx { font-family: var(--mono); font-size: 12px; color: #fff; background: var(--accent); width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center; flex: none; }
+
+  /* ---------- Callout ---------- */
+  .callout {
+    border-radius: 12px; padding: 16px 18px 16px 20px; margin: 18px 0; border: 1px solid var(--border);
+    background: var(--surface-3); position: relative; font-size: 14.5px; color: var(--ink-2);
+  }
+  .callout.accent { border-left: 3px solid var(--accent); background: var(--accent-soft); }
+  .callout.warn { border-left: 3px solid var(--warn); background: var(--warn-soft); }
+  .callout .label { font-weight: 700; color: var(--ink); font-size: 13px; display: block; margin-bottom: 4px; }
+
+  /* ---------- Tables ---------- */
+  .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 12px; margin: 8px 0 6px; box-shadow: var(--shadow); }
+  table { border-collapse: collapse; width: 100%; font-size: 13.5px; min-width: 480px; }
+  th, td { text-align: left; padding: 11px 15px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  thead th { background: var(--surface-2); color: var(--ink); font-weight: 700; font-size: 12.5px; letter-spacing: .02em; white-space: nowrap; position: sticky; top: 0; }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr:hover { background: var(--surface-3); }
+  td.mod { font-family: var(--mono); font-size: 12.5px; color: var(--accent-ink); white-space: nowrap; }
+  td .num { font-family: var(--mono); color: var(--ink-3); }
+  .center { text-align: center; }
+  .tabular { font-variant-numeric: tabular-nums; }
+
+  /* pills for feasibility */
+  .pill { display: inline-block; min-width: 20px; text-align: center; padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 700; }
+  .p-good { background: var(--good-soft); color: var(--good); }
+  .p-ok   { background: var(--info-soft); color: var(--info); }
+  .p-mid  { background: var(--warn-soft); color: var(--warn); }
+  .p-bad  { background: var(--crit-soft); color: var(--crit); }
+  .diff { font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 6px; }
+  .d-low { background: var(--good-soft); color: var(--good); }
+  .d-mid { background: var(--warn-soft); color: var(--warn); }
+  .d-high{ background: var(--crit-soft); color: var(--crit); }
+
+  /* ---------- Layer diagram ---------- */
+  .layers { display: flex; flex-direction: column; gap: 6px; margin: 8px 0 4px; }
+  .layer {
+    display: grid; grid-template-columns: 48px 1fr; align-items: stretch; border-radius: 10px; overflow: hidden;
+    border: 1px solid var(--border); background: var(--surface);
+  }
+  .layer .lv { background: var(--accent); color: #fff; font-family: var(--mono); font-weight: 700; font-size: 13px; display: grid; place-items: center; }
+  .layer .lb { padding: 11px 16px; }
+  .layer .lt { font-weight: 700; font-size: 14px; }
+  .layer .ld { font-size: 12.5px; color: var(--ink-3); }
+  .layer:nth-child(1) .lv { opacity: 1; }
+  .layer:nth-child(2) .lv { opacity: .9; }
+  .layer:nth-child(3) .lv { opacity: .8; }
+  .layer:nth-child(4) .lv { opacity: .7; }
+  .layer:nth-child(5) .lv { opacity: .6; }
+  .layer:nth-child(6) .lv { opacity: .5; }
+
+  /* dataflow */
+  .flow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 10px 0; }
+  .flow .step { background: var(--surface); border: 1px solid var(--border-strong); border-radius: 8px; padding: 8px 13px; font-size: 13px; font-weight: 600; }
+  .flow .arr { color: var(--accent); font-weight: 700; }
+
+  /* ---------- Code / tree ---------- */
+  pre {
+    background: var(--surface-3); border: 1px solid var(--border); border-radius: 12px; padding: 18px 20px;
+    overflow-x: auto; font-family: var(--mono); font-size: 12.5px; line-height: 1.65; color: var(--ink-2); margin: 8px 0;
+  }
+  pre .c { color: var(--ink-3); }
+  pre .k { color: var(--accent-ink); font-weight: 600; }
+  code.ic { font-family: var(--mono); font-size: .88em; background: var(--surface-2); padding: 1px 6px; border-radius: 5px; color: var(--accent-ink); }
+
+  /* ---------- Roadmap ---------- */
+  .road { display: grid; gap: 10px; grid-template-columns: repeat(2, 1fr); margin-top: 8px; }
+  .phase { display: flex; gap: 14px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 15px 17px; box-shadow: var(--shadow); }
+  .phase .pn { font-family: var(--mono); font-weight: 700; font-size: 13px; color: var(--accent); flex: none; width: 26px; height: 26px; border-radius: 50%; border: 1.5px solid var(--accent); display: grid; place-items: center; }
+  .phase .pt { font-weight: 700; font-size: 14.5px; margin-bottom: 2px; }
+  .phase .pd { font-size: 13px; color: var(--ink-2); }
+
+  /* checklist */
+  .checks { list-style: none; padding: 0; margin: 10px 0 0; display: grid; gap: 8px; }
+  .checks li { display: flex; gap: 11px; align-items: baseline; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px 16px; font-size: 14px; }
+  .checks .qn { font-family: var(--mono); color: var(--accent); font-weight: 700; flex: none; }
+
+  ul.clean { padding-left: 20px; margin: 8px 0 14px; }
+  ul.clean li { margin-bottom: 6px; font-size: 14.5px; color: var(--ink-2); max-width: 66ch; }
+  ul.clean li strong { color: var(--ink); }
+
+  /* footer */
+  .foot { margin-top: 60px; padding-top: 26px; border-top: 1px solid var(--border); font-size: 12.5px; color: var(--ink-3); }
+  .foot .disc { background: var(--warn-soft); border: 1px solid var(--border); border-left: 3px solid var(--warn); border-radius: 10px; padding: 13px 16px; color: var(--ink-2); margin-bottom: 18px; font-size: 13px; }
+
+  /* theme toggle */
+  .toggle {
+    position: fixed; top: 18px; right: 20px; z-index: 50; width: 40px; height: 40px; border-radius: 10px;
+    background: var(--surface); border: 1px solid var(--border); color: var(--ink-2); cursor: pointer;
+    display: grid; place-items: center; box-shadow: var(--shadow); font-size: 17px;
+  }
+  .toggle:hover { color: var(--ink); border-color: var(--border-strong); }
+  .toggle:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* mobile */
+  .menu-btn { display: none; }
+  @media (max-width: 900px) {
+    .shell { grid-template-columns: 1fr; }
+    .sidebar { position: fixed; z-index: 40; top: 0; left: 0; width: 280px; background: var(--surface); transform: translateX(-100%); transition: transform .25s; box-shadow: var(--shadow); }
+    .sidebar.open { transform: translateX(0); }
+    .menu-btn { display: grid; place-items: center; position: fixed; top: 18px; left: 16px; z-index: 50; width: 40px; height: 40px; border-radius: 10px; background: var(--surface); border: 1px solid var(--border); color: var(--ink); cursor: pointer; box-shadow: var(--shadow); font-size: 18px; }
+    .content { padding-top: 8px; }
+    .hero { padding-top: 66px; }
+    .g2, .g3, .road { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 560px) {
+    .sec-tag { margin-left: 0; }
+    body { font-size: 15px; }
+  }
+</style>
+
+<button class="menu-btn" id="menuBtn" aria-label="目次を開閉">☰</button>
+<button class="toggle" id="themeBtn" aria-label="テーマ切替">◐</button>
+
+<div class="shell">
+  <!-- ============ SIDEBAR ============ -->
+  <aside class="sidebar" id="sidebar">
+    <div class="brand">
+      <div class="brand-mark">株</div>
+      <div>
+        <div class="brand-name">株式分析システム</div>
+        <div class="brand-sub">Design Spec · v0.1</div>
+      </div>
+    </div>
+    <p class="toc-label">目次</p>
+    <nav>
+      <ul class="toc" id="toc">
+        <li><a href="#s0"><span class="n">00</span>設計原則</a></li>
+        <li><a href="#s1"><span class="n">01</span>システム全体像</a></li>
+        <li><a href="#s2"><span class="n">02</span>分析エンジン（11方針）</a></li>
+        <li><a href="#s3"><span class="n">03</span>必要なデータ</a></li>
+        <li><a href="#s4"><span class="n">04</span>データ取得方法</a></li>
+        <li><a href="#s5"><span class="n">05</span>プログラム構成</a></li>
+        <li><a href="#s6"><span class="n">06</span>スクリーニング</a></li>
+        <li><a href="#s7"><span class="n">07</span>決算分析</a></li>
+        <li><a href="#s8"><span class="n">08</span>企業比較</a></li>
+        <li><a href="#s9"><span class="n">09</span>バックテスト</a></li>
+        <li><a href="#s10"><span class="n">10</span>監視・継続追跡</a></li>
+        <li><a href="#s11"><span class="n">11</span>レポート出力</a></li>
+        <li><a href="#s12"><span class="n">12</span>実現性の整理</a></li>
+        <li><a href="#s13"><span class="n">13</span>ロードマップ</a></li>
+        <li><a href="#s14"><span class="n">14</span>確認事項（次の一手）</a></li>
+      </ul>
+    </nav>
+  </aside>
+
+  <!-- ============ CONTENT ============ -->
+  <main class="content">
+    <header class="hero">
+      <div class="eyebrow">Design Document</div>
+      <h1>株式分析システム 設計書</h1>
+      <p class="lede">「業績が良い企業」を並べるのではなく、業績・成長性・バリュエーション・市場期待・株価・リスクを<strong>総合的に分析</strong>し、さらに<strong>過去データで手法そのものを検証</strong>できるシステム。投資判断は自動化せず、<strong>人間が判断できる状態まで材料を整える</strong>ことを目的とします。</p>
+      <div class="meta">
+        <span class="chip"><span class="dot"></span>対象市場&nbsp;<b>日本株（東証）中心</b></span>
+        <span class="chip"><span class="dot"></span>データ予算&nbsp;<b>無料基盤＋有料API併用可</b></span>
+        <span class="chip"><span class="dot"></span>出力&nbsp;<b>Markdown / HTML / CSV</b></span>
+        <span class="chip status"><span class="dot"></span>ステータス&nbsp;<b>ドラフト（承認待ち）</b></span>
+        <span class="chip"><span class="dot"></span>作成日&nbsp;<b>2026-08-09</b></span>
+      </div>
+    </header>
+
+    <!-- 0 -->
+    <section id="s0">
+      <div class="sec-head"><span class="sec-num">00</span><h2>設計原則</h2></div>
+      <p class="sec-tag">システム全体を貫く6つの前提</p>
+      <div class="grid g3">
+        <div class="card"><h4><span class="idx">1</span>判断は自動化しない</h4><p>スコアやランキングは「注目度」であって「買い推奨」ではない。材料整理までを自動化し、最終判断は人間が行う。</p></div>
+        <div class="card"><h4><span class="idx">2</span>総合＋過去検証</h4><p>「業績が良い」で終わらせない。6つの観点を総合し、さらに手法自体を過去データで検証できることを最優先要件とする。</p></div>
+        <div class="card"><h4><span class="idx">3</span>出典を必ず記録</h4><p>すべてのデータに「出典／取得日時／対象期間／取得パラメータ／APIバージョン」を付与する（Provenance ファースト）。</p></div>
+        <div class="card"><h4><span class="idx">4</span>Point-in-Time遵守</h4><p>検証では「その時点で実際に入手可能だった情報」だけを使う。先読み・生存者バイアスを排除する。</p></div>
+        <div class="card"><h4><span class="idx">5</span>再現性</h4><p>同じ入力・同じルール設定・同じ基準日なら、同じレポートが再生成できる。設定はすべてファイル化する。</p></div>
+        <div class="card"><h4><span class="idx">6</span>既存方針の保存</h4><p>既存の11分析方針を、分析エンジンの11モジュールとして1対1で実装し、方針を壊さない。</p></div>
+      </div>
+    </section>
+
+    <!-- 1 -->
+    <section id="s1">
+      <div class="sec-head"><span class="sec-num">01</span><h2>システム全体像</h2></div>
+      <p class="sec-tag">6層のパイプライン構成</p>
+      <p class="lead-p">「候補を絞る → 多面的に分析 → 手法を過去検証 → 監視追跡 → 人間が読めるレポートに集約」という一連の流れをレイヤーで構成します。</p>
+      <div class="layers">
+        <div class="layer"><div class="lv">L5</div><div class="lb"><div class="lt">レポーティング層</div><div class="ld">Markdown / HTML / CSV の出力</div></div></div>
+        <div class="layer"><div class="lv">L4</div><div class="lb"><div class="lt">アプリケーション層</div><div class="ld">スクリーニング / 決算分析 / 企業比較 / バックテスト / 監視追跡</div></div></div>
+        <div class="layer"><div class="lv">L3</div><div class="lb"><div class="lt">分析エンジン層</div><div class="ld">既存11分析方針を11モジュール化 ＋ 総合スコアリング</div></div></div>
+        <div class="layer"><div class="lv">L2</div><div class="lb"><div class="lt">処理・指標計算層</div><div class="ld">正規化 / 財務・株価指標 / Point-in-Time 整合</div></div></div>
+        <div class="layer"><div class="lv">L1</div><div class="lb"><div class="lt">データ取得層</div><div class="ld">J-Quants / EDINET / 株価 / 市場期待 ＋ 出典記録（Provenance）</div></div></div>
+        <div class="layer"><div class="lv">L0</div><div class="lb"><div class="lt">ストレージ層</div><div class="ld">raw / processed / cache / metadata</div></div></div>
+      </div>
+      <h3>データフロー（1サイクル）</h3>
+      <div class="flow">
+        <span class="step">ユニバース定義</span><span class="arr">→</span>
+        <span class="step">データ取得（出典記録）</span><span class="arr">→</span>
+        <span class="step">正規化・指標計算</span><span class="arr">→</span>
+        <span class="step">分析エンジン（11）</span><span class="arr">→</span>
+        <span class="step">総合スコア</span><span class="arr">→</span>
+        <span class="step">スクリーニング</span><span class="arr">→</span>
+        <span class="step">個別深掘り</span><span class="arr">→</span>
+        <span class="step">バックテスト検証</span><span class="arr">→</span>
+        <span class="step">監視更新</span><span class="arr">→</span>
+        <span class="step">レポート出力</span>
+      </div>
+    </section>
+
+    <!-- 2 -->
+    <section id="s2">
+      <div class="sec-head"><span class="sec-num">02</span><h2>分析エンジン｜既存11方針のモジュール化</h2></div>
+      <p class="sec-tag">既存方針を 1対1 でモジュールに対応</p>
+      <p class="lead-p">各モジュールは「入力データ → 指標 → 根拠つき所見 → サブスコア」を返します。総合スコアは重み付き合成で、重みは設定ファイルで外部化します。</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>#</th><th>既存方針</th><th>モジュール</th><th>主な指標・出力</th></tr></thead>
+          <tbody>
+            <tr><td class="num">1</td><td>企業の業績分析</td><td class="mod">performance</td><td>売上/営業利益/当期利益の水準・推移、利益率、セグメント別</td></tr>
+            <tr><td class="num">2</td><td>決算分析</td><td class="mod">earnings</td><td>直近実績、会社計画比、進捗率、上方/下方修正、サプライズ</td></tr>
+            <tr><td class="num">3</td><td>財務分析</td><td class="mod">financials</td><td>自己資本比率、ROE/ROA/ROIC、有利子負債、CF、Altman Z 等</td></tr>
+            <tr><td class="num">4</td><td>バリュエーション分析</td><td class="mod">valuation</td><td>PER/PBR/PSR/EV·EBITDA/配当利回り、簡易DCF、過去レンジ内位置</td></tr>
+            <tr><td class="num">5</td><td>成長性分析</td><td class="mod">growth</td><td>売上/利益CAGR、成長の質（一過性か）、再投資効率</td></tr>
+            <tr><td class="num">6</td><td>株価分析</td><td class="mod">price_action</td><td>トレンド、移動平均、ボラ、相対力（対TOPIX/業種）、出来高</td></tr>
+            <tr><td class="num">7</td><td>市場期待との比較</td><td class="mod">market_expectation</td><td>コンセンサス vs 実績/会社計画、期待の織り込み度合い</td></tr>
+            <tr><td class="num">8</td><td>投資仮説の作成</td><td class="mod">hypothesis</td><td>「なぜ上がりうるか」をドライバー/前提/検証条件で構造化</td></tr>
+            <tr><td class="num">9</td><td>反証分析</td><td class="mod">counter_analysis</td><td>仮説を崩す条件、ベア視点、確証バイアス点検</td></tr>
+            <tr><td class="num">10</td><td>リスク分析</td><td class="mod">risk</td><td>業績/財務/流動性/集中/規制/為替/イベント、下方シナリオ</td></tr>
+            <tr><td class="num">11</td><td>複数投資家視点</td><td class="mod">investor_views</td><td>バリュー/グロース/配当/クオンツ 等、視点別評価</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="callout accent">
+        <span class="label">「良い企業リスト」との決定的な差</span>
+        8（仮説）・9（反証）・11（複数視点）は数値だけでなく<strong>構造化された文章所見</strong>を出します。総合スコアには「反証が強い＝減点」「リスクが高い＝減点」のペナルティ機構を入れ、データ欠損時は0点扱いせず<strong>「判定保留」を明示</strong>します。
+      </div>
+    </section>
+
+    <!-- 3 -->
+    <section id="s3">
+      <div class="sec-head"><span class="sec-num">03</span><h2>必要なデータ</h2></div>
+      <p class="sec-tag">カテゴリと用途</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>カテゴリ</th><th>具体項目</th><th>主な用途</th></tr></thead>
+          <tbody>
+            <tr><td>銘柄マスタ</td><td>コード、名称、業種、市場区分、上場/廃止日、発行済株式数</td><td class="mod">ユニバース</td></tr>
+            <tr><td>株価</td><td>日次OHLCV、調整後終値、売買代金</td><td class="mod">price_action, valuation</td></tr>
+            <tr><td>財務（PL）</td><td>売上高、各利益、EPS、セグメント</td><td class="mod">performance, growth</td></tr>
+            <tr><td>財務（BS）</td><td>総資産、自己資本、有利子負債、現預金</td><td class="mod">financials</td></tr>
+            <tr><td>財務（CF）</td><td>営業/投資/財務CF、FCF</td><td class="mod">financials</td></tr>
+            <tr><td>決算開示</td><td>実績、<strong>会社計画</strong>、修正、<strong>開示日時</strong></td><td class="mod">earnings</td></tr>
+            <tr><td>決算スケジュール</td><td>決算発表予定日</td><td class="mod">watchlist, PIT</td></tr>
+            <tr><td>市場期待</td><td>アナリストコンセンサス（売上/利益/目標株価）</td><td class="mod">market_expectation</td></tr>
+            <tr><td>指数</td><td>TOPIX、業種別指数 等</td><td class="mod">price_action, backtest</td></tr>
+            <tr><td>需給ほか</td><td>投資部門別売買、空売り比率、信用残</td><td class="mod">risk, price_action</td></tr>
+            <tr><td>マクロ（任意）</td><td>金利、為替（USD/JPY）</td><td class="mod">risk</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="callout accent">
+        <span class="label">「対象期間」は二重で持つ</span>
+        財務は <strong>会計期間</strong>（例: FY2025 Q1）と <strong>開示日／入手可能日</strong>（例: 2025/8/1 に短信開示）の両方を保持。バックテストは後者で「その時点で使えたか」を判定します。保持期間は株価・財務ともに<strong>最低10年</strong>、銘柄マスタは<strong>廃止銘柄を含む</strong>時系列を維持します。
+      </div>
+    </section>
+
+    <!-- 4 -->
+    <section id="s4">
+      <div class="sec-head"><span class="sec-num">04</span><h2>データ取得方法</h2></div>
+      <p class="sec-tag">日本株の主要データソース</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>ソース</th><th>取得内容</th><th>費用</th><th>位置づけ</th></tr></thead>
+          <tbody>
+            <tr><td><strong>J-Quants API</strong><br><span class="num">JPX公式</span></td><td>株価、財務諸表、決算発表予定、銘柄マスタ（廃止含む）、投資部門別、空売り、指数</td><td>無料枠あり／有料で期間拡張</td><td><span class="pill p-good">中核</span></td></tr>
+            <tr><td><strong>EDINET API</strong><br><span class="num">金融庁</span></td><td>有価証券報告書・四半期報告書（詳細財務・注記・セグメント／XBRL）</td><td>無料</td><td><span class="pill p-ok">一次情報</span></td></tr>
+            <tr><td><strong>TDnet</strong><br><span class="num">適時開示</span></td><td>決算短信、会社計画、修正</td><td>無料（APIは限定的）</td><td><span class="pill p-mid">補完</span></td></tr>
+            <tr><td><strong>yfinance</strong> 等<br><span class="num">非公式</span></td><td>株価・簡易財務（<code class="ic">XXXX.T</code>）</td><td>無料</td><td><span class="pill p-mid">クロスチェック</span></td></tr>
+            <tr><td><strong>有料コンセンサス</strong><br><span class="num">IFIS / QUICK 系 等</span></td><td>アナリストコンセンサス、目標株価</td><td>有料</td><td><span class="pill p-bad">要検討</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="callout accent">
+        <span class="label">推奨構成</span>
+        <code class="ic">J-Quants（有料ライト）＋ EDINET（無料）</code> を基盤にし、市場期待（コンセンサス）だけは入手可否・費用を見て段階導入。まず無料枠で骨組みを作り、必要に応じ有料化します。
+      </div>
+      <h3>出典記録（Provenance）— 必須設計</h3>
+      <p>すべての取得データに次のメタデータを付与し、<code class="ic">data/metadata/</code> に保存＋データ本体にも埋め込みます。</p>
+      <pre><span class="c"># 1回の取得に対するメタデータレコード（例）</span>
+<span class="k">source</span>:            "J-Quants /fins/statements"
+<span class="k">source_type</span>:       "official_api"
+<span class="k">api_version</span>:       "v1"
+<span class="k">fetched_at_utc</span>:    "2026-08-09T02:15:00Z"
+<span class="k">fetched_at_jst</span>:    "2026-08-09T11:15:00+09:00"
+<span class="k">target_entity</span>:     "7203 トヨタ自動車"
+<span class="k">accounting_period</span>: "FY2026 Q1 (2025-04-01..2025-06-30)"  <span class="c"># 会計期間</span>
+<span class="k">disclosure_date</span>:   "2025-08-01"    <span class="c"># 入手可能になった日（PIT用）</span>
+<span class="k">data_hash</span>:         "sha256:..."    <span class="c"># 改変検知・再現性</span></pre>
+    </section>
+
+    <!-- 5 -->
+    <section id="s5">
+      <div class="sec-head"><span class="sec-num">05</span><h2>プログラム・フォルダ構成</h2></div>
+      <p class="sec-tag">実装言語は Python 想定（既存 index.html は保持）</p>
+      <pre><span class="k">config/</span>            <span class="c"># 設定（ユニバース・スクリーニング条件・重み）</span>
+<span class="k">data/</span>
+  ├─ raw/          <span class="c"># 取得生データ</span>
+  ├─ processed/    <span class="c"># 正規化・指標計算後</span>
+  ├─ cache/        <span class="c"># APIキャッシュ</span>
+  └─ metadata/     <span class="c"># 出典記録（Provenance）</span>
+<span class="k">src/</span>
+  ├─ ingestion/    <span class="c"># L1 取得：jquants / edinet / price / provenance</span>
+  ├─ processing/   <span class="c"># L2 正規化・指標・point_in_time</span>
+  ├─ analysis/     <span class="c"># L3 分析エンジン11モジュール ＋ scoring</span>
+  ├─ screening/    <span class="c"># L4 スクリーニング</span>
+  ├─ comparison/   <span class="c"># L4 企業比較</span>
+  ├─ backtest/     <span class="c"># L4 バックテスト</span>
+  ├─ watchlist/    <span class="c"># L4 監視追跡</span>
+  ├─ reporting/    <span class="c"># L5 markdown / html / csv 出力</span>
+  └─ cli.py        <span class="c"># コマンド入口</span>
+<span class="k">reports/</span>          <span class="c"># 出力先（日付フォルダ）</span>
+<span class="k">tests/</span>  <span class="k">notebooks/</span>  <span class="k">logs/</span></pre>
+      <h3>CLI サブコマンド（想定インターフェース）</h3>
+      <pre><span class="k">stocksys fetch</span>            <span class="c"># データ取得（出典記録つき）</span>
+<span class="k">stocksys screen</span>           <span class="c"># スクリーニング実行</span>
+<span class="k">stocksys analyze</span> 7203     <span class="c"># 個別深掘り（11モジュール＋レポート）</span>
+<span class="k">stocksys compare</span> 7203 7267 <span class="c"># 企業比較</span>
+<span class="k">stocksys backtest</span>         <span class="c"># 手法のバックテスト検証</span>
+<span class="k">stocksys watch</span>            <span class="c"># 監視リスト更新・差分検知</span>
+<span class="k">stocksys report</span>           <span class="c"># レポート出力（md / html / csv）</span></pre>
+    </section>
+
+    <!-- 6 -->
+    <section id="s6">
+      <div class="sec-head"><span class="sec-num">06</span><h2>銘柄スクリーニング機能</h2></div>
+      <p class="sec-tag">広いユニバースから深掘り候補を絞る ── 足切りであって推奨ではない</p>
+      <div class="grid g2">
+        <div class="card"><h4>条件カテゴリ</h4><p>バリュエーション（PER/PBR/利回り・過去レンジ下位）／成長性（CAGR・連続増収増益）／財務健全性（自己資本比率・負債/EBITDA・FCF）／収益性（ROE・ROIC&gt;WACC）／株価・需給（相対力・流動性）／市場期待（上方修正・実績&gt;コンセンサス）／除外条件（債務超過・上場浅い 等）。</p></div>
+        <div class="card"><h4>出力と透明性</h4><p>条件通過リスト（CSV＋Markdown表）。各銘柄が<strong>どの条件を満たし／落ちたか</strong>の内訳を明示。総合スコアで参考順位づけ。「割安×成長」「高配当×健全」等の<strong>プリセット</strong>を設定ファイルに定義。</p></div>
+      </div>
+      <div class="callout accent"><span class="label">設計上の要点</span>条件はすべて設定ファイル化（コード変更なしで調整可能）。スクリーニング条件は §09 バックテストと<strong>同じルール定義を共有</strong>し、条件自体を過去検証できるようにします。</div>
+    </section>
+
+    <!-- 7 -->
+    <section id="s7">
+      <div class="sec-head"><span class="sec-num">07</span><h2>決算分析機能</h2></div>
+      <p class="sec-tag">実績・会社計画・市場期待の3軸で「決算の中身」を構造化</p>
+      <ul class="clean">
+        <li><strong>実績評価</strong>：売上/各利益の前年同期比・QoQ、利益率変化</li>
+        <li><strong>会社計画比</strong>：通期計画への進捗率（季節性補正の注記）、達成確度</li>
+        <li><strong>修正・サプライズ</strong>：上方/下方修正の有無・幅・理由、実績 vs コンセンサス</li>
+        <li><strong>質の評価</strong>：増益の中身（本業か一過性か、為替影響、特益/特損）</li>
+        <li><strong>セグメント</strong>：伸びている／縮んでいる事業（EDINET注記を活用）</li>
+        <li><strong>ガイダンス解釈</strong>：会社トーン（保守/強気）を過去の達成実績と対比</li>
+      </ul>
+      <div class="callout accent"><span class="label">イベント連携</span>決算発表予定日を監視し、発表後に当該銘柄の決算分析を自動実行 → 監視リスト（§10）へ差分反映。出力は「ポジティブ／ネガティブ／要監視」の3分類で提示します。</div>
+    </section>
+
+    <!-- 8 -->
+    <section id="s8">
+      <div class="sec-head"><span class="sec-num">08</span><h2>企業比較機能</h2></div>
+      <p class="sec-tag">複数銘柄を同一基準で横並び比較</p>
+      <div class="grid g2">
+        <div class="card"><h4>比較軸</h4><p>規模／成長性（CAGR）／収益性（利益率・ROE・ROIC）／財務（自己資本比率・負債・FCF）／バリュエーション（PER/PBR/PSR/EV·EBITDA/利回り）／株価（対TOPIX相対力）／市場期待（目標株価乖離）／総合スコアと11モジュール別サブスコア。</p></div>
+        <div class="card"><h4>比較の作法</h4><p><strong>業種・会計基準の違いを明示</strong>（例：銀行と製造業のPBRは比較不可）。単純な優劣でなく「どの投資家視点で優位か」を併記。偏差値化・パーセンタイルで相対位置を表現。</p></div>
+      </div>
+      <div class="callout accent"><span class="label">出力</span>比較表（CSV＋Markdown）とレーダー／バーチャート（HTMLダッシュボード）。「割安かつ成長」「割高だが質が高い」等の分類コメントを添えます。</div>
+    </section>
+
+    <!-- 9 -->
+    <section id="s9">
+      <div class="sec-head"><span class="sec-num">09</span><h2>バックテスト機能</h2></div>
+      <p class="sec-tag">本システムの核心 ── 手法そのものが過去に有効だったかを検証する</p>
+      <p class="lead-p">スクリーニング条件・スコアリングを過去の任意時点に適用したら、その後どうなったかを測ります。手法の<strong>有効性・安定性・弱点</strong>を定量化し、人間がルールを改善できるようにします。</p>
+      <div class="grid g2">
+        <div class="card"><h4>検証の枠組み</h4><p>基準日ごと（月次/四半期）にルール適用 → 上位N銘柄でポートフォリオ構成 → 次リバランスまでのリターンを記録。ベンチマークは TOPIX（配当込み）。</p></div>
+        <div class="card"><h4>評価指標</h4><p>累積/年率リターン、超過リターン、勝率、最大ドローダウン、シャープ／ソルティノ。手法妥当性は <strong>IC（情報係数）</strong>・分位ポートフォリオ（Q1〜Q5）の単調性・ヒットレシオ。</p></div>
+      </div>
+      <div class="callout warn">
+        <span class="label">バイアス排除 ── 設計の生命線</span>
+        <ul class="clean" style="margin-bottom:0">
+          <li><strong>先読み（look-ahead）防止</strong>：財務は「開示日」を使い、基準日時点で未開示のデータは使わない</li>
+          <li><strong>生存者バイアス防止</strong>：ユニバースに<strong>廃止銘柄を含む</strong>（上場当時の構成で判定）</li>
+          <li><strong>リスタテメント注意</strong>：後日修正値でなく当時発表値（as-reported）を優先</li>
+          <li><strong>取引コスト・流動性</strong>：売買代金下限、手数料・スリッページを控除可能に</li>
+          <li><strong>過剰最適化防止</strong>：学習/検証期間を分ける（walk-forward）。過度なパラメータ調整を戒める注記を出力</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- 10 -->
+    <section id="s10">
+      <div class="sec-head"><span class="sec-num">10</span><h2>監視・継続追跡の仕組み</h2></div>
+      <p class="sec-tag">候補・保有・ウォッチ銘柄をフォローし「変化」を検知して通知</p>
+      <div class="grid g2">
+        <div class="card"><h4>監視リスト管理</h4><p>各銘柄に「追加理由」「追加時点のスコア」に加え、<strong>投資仮説とその検証条件・反証条件</strong>を紐付け。仮説は「進行中/支持/否定/要見直し」で状態管理。</p></div>
+        <div class="card"><h4>検知イベント</h4><p>決算発表 → 自動で決算分析／業績修正の開示／総合スコアの閾値超え変動／バリュエーションのレンジ逸脱／相対力の急変・新高値安値／空売り・信用残の変化。</p></div>
+      </div>
+      <div class="callout accent"><span class="label">運用（定期実行）</span>日次/週次バッチ。Claude Code on the web の <strong>Trigger / Routine</strong>（スケジュール実行）やローカル cron で「取得 → 差分検知 → レポート生成」を回します。出力は監視ダッシュボード（HTML）と変化アラート（Markdown／差分：何が・いつ・どれだけ・出典つき）。</div>
+    </section>
+
+    <!-- 11 -->
+    <section id="s11">
+      <div class="sec-head"><span class="sec-num">11</span><h2>レポート出力設計</h2></div>
+      <p class="sec-tag">3形式を目的で使い分け</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>形式</th><th>用途</th><th>特徴</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Markdown</strong></td><td>個別分析・決算サマリー・変化アラート</td><td>Git差分で履歴追跡でき、レビューしやすい（<strong>一次成果物</strong>）</td></tr>
+            <tr><td><strong>HTML</strong></td><td>スクリーニング/比較/監視ダッシュボード</td><td>チャート・インタラクティブ表。閲覧性重視（既存 index.html 資産を活用可）</td></tr>
+            <tr><td><strong>CSV</strong></td><td>スクリーニング結果・比較表・バックテスト時系列</td><td>二次利用・表計算・再分析向け</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="callout accent">
+        <span class="label">全レポート共通の必須要素</span>
+        データ出典一覧（ソース・APIバージョン）／取得日時（UTC·JST）と対象期間／データ充足度・欠損の明示（判定保留を隠さない）／免責（分析材料であり売買推奨ではない）／再現情報（使用したルール設定のバージョン）。個別銘柄レポートは<strong>結論の前に必ず「反証（弱気シナリオ）」を載せます</strong>。
+      </div>
+    </section>
+
+    <!-- 12 -->
+    <section id="s12">
+      <div class="sec-head"><span class="sec-num">12</span><h2>実現性の整理</h2></div>
+      <p class="sec-tag">現在できること／追加で必要なもの／技術的に難しいこと</p>
+      <div class="grid g3">
+        <div class="card" style="border-top:3px solid var(--good)">
+          <h4 style="color:var(--good)">✓ 現在できること</h4>
+          <p>アーキ全体の構築／無料データでの骨組み（J-Quants無料枠・EDINET・yfinance）／11分析モジュール／スクリーニング・比較・個別・決算分析／出典記録・対象期間の記録／Markdown・CSV・静的HTML／バックテストの枠組み／Trigger·cronでの定期実行。</p>
+        </div>
+        <div class="card" style="border-top:3px solid var(--info)">
+          <h4 style="color:var(--info)">＋ 追加で必要</h4>
+          <p>J-Quantsアカウント（履歴拡張は有料推奨）／EDINET登録（無料）／<strong>市場期待＝有料コンセンサス契約</strong>／Python実行環境と依存ライブラリ／秘密情報管理（.env、キーは非コミット）／10年データの永続ストレージ方針。</p>
+        </div>
+        <div class="card" style="border-top:3px solid var(--crit)">
+          <h4 style="color:var(--crit)">△ 技術的に難しい</h4>
+          <p>コンセンサスの入手と時系列スナップ蓄積／PIT財務の厳密性（開示日・リスタテメント分離）／生存者バイアス対策の完全性／短信ガイダンスの構造化／無料ソースのデータ品質クロスチェック／コンテナ揮発性への対応。</p>
+        </div>
+      </div>
+      <h3>実現性サマリー</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>機能</th><th class="center">無料のみ</th><th class="center">有料併用</th><th class="center">難易度</th></tr></thead>
+          <tbody>
+            <tr><td>データ取得基盤＋出典記録</td><td class="center"><span class="pill p-good">◎</span></td><td class="center"><span class="pill p-good">◎</span></td><td class="center"><span class="diff d-low">低</span></td></tr>
+            <tr><td>11分析モジュール</td><td class="center"><span class="pill p-ok">○</span></td><td class="center"><span class="pill p-good">◎</span></td><td class="center"><span class="diff d-mid">中</span></td></tr>
+            <tr><td>スクリーニング</td><td class="center"><span class="pill p-good">◎</span></td><td class="center"><span class="pill p-good">◎</span></td><td class="center"><span class="diff d-low">低</span></td></tr>
+            <tr><td>決算分析</td><td class="center"><span class="pill p-mid">△</span></td><td class="center"><span class="pill p-good">◎</span></td><td class="center"><span class="diff d-mid">中</span></td></tr>
+            <tr><td>企業比較</td><td class="center"><span class="pill p-good">◎</span></td><td class="center"><span class="pill p-good">◎</span></td><td class="center"><span class="diff d-low">低</span></td></tr>
+            <tr><td>市場期待との比較</td><td class="center"><span class="pill p-bad">✕〜△</span></td><td class="center"><span class="pill p-ok">○</span></td><td class="center"><span class="diff d-high">高</span></td></tr>
+            <tr><td>バックテスト（PIT/生存者対策）</td><td class="center"><span class="pill p-mid">△</span></td><td class="center"><span class="pill p-ok">○</span></td><td class="center"><span class="diff d-high">高</span></td></tr>
+            <tr><td>監視・継続追跡</td><td class="center"><span class="pill p-ok">○</span></td><td class="center"><span class="pill p-good">◎</span></td><td class="center"><span class="diff d-mid">中</span></td></tr>
+            <tr><td>レポート（md/html/csv）</td><td class="center"><span class="pill p-good">◎</span></td><td class="center"><span class="pill p-good">◎</span></td><td class="center"><span class="diff d-low">低</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p style="font-size:12.5px;color:var(--ink-3);margin-top:8px">◎ 十分 ／ ○ 概ね可 ／ △ 制約あり ／ ✕ 困難</p>
+    </section>
+
+    <!-- 13 -->
+    <section id="s13">
+      <div class="sec-head"><span class="sec-num">13</span><h2>段階的構築ロードマップ</h2></div>
+      <p class="sec-tag">※ 実装は本設計の承認後に着手します。以下は順序の提案</p>
+      <div class="road">
+        <div class="phase"><div class="pn">1</div><div><div class="pt">基盤</div><div class="pd">フォルダ構成・設定・Provenance・J-Quants/EDINET取得・正規化・指標計算</div></div></div>
+        <div class="phase"><div class="pn">2</div><div><div class="pt">分析＆スクリーニング</div><div class="pd">11モジュール＋総合スコア＋スクリーニング＋Markdown/CSVレポート</div></div></div>
+        <div class="phase"><div class="pn">3</div><div><div class="pt">深掘り</div><div class="pd">決算分析＋企業比較＋HTMLダッシュボード</div></div></div>
+        <div class="phase"><div class="pn">4</div><div><div class="pt">検証</div><div class="pd">バックテスト（PIT・生存者バイアス対策込み）</div></div></div>
+        <div class="phase"><div class="pn">5</div><div><div class="pt">運用</div><div class="pd">監視リスト・変化検知・定期実行（Trigger/cron）・アラート</div></div></div>
+        <div class="phase"><div class="pn">6</div><div><div class="pt">拡張（任意）</div><div class="pd">市場期待（有料コンセンサス）統合・データ品質クロスチェック強化</div></div></div>
+      </div>
+    </section>
+
+    <!-- 14 -->
+    <section id="s14">
+      <div class="sec-head"><span class="sec-num">14</span><h2>確認事項（次の一手）</h2></div>
+      <p class="sec-tag">以下をご判断いただければ、承認後にフェーズ1へ進みます</p>
+      <ul class="checks">
+        <li><span class="qn">Q1</span><span>実装言語＝<strong>Python</strong> で問題ないか。</span></li>
+        <li><span class="qn">Q2</span><span>初期データ源＝<strong>J-Quants ＋ EDINET（まず無料枠）</strong>で開始し、市場期待は後追いでよいか。</span></li>
+        <li><span class="qn">Q3</span><span>有料化の優先度：<strong>J-Quants有料（履歴拡張）</strong>と<strong>コンセンサス（市場期待）</strong>のどちらを先に投資するか。</span></li>
+        <li><span class="qn">Q4</span><span>データ永続化方針：どこまでを Git 管理し、どこからを外部ストレージにするか。</span></li>
+        <li><span class="qn">Q5</span><span>フォルダ構成（§05）・レポート様式（§11）で修正したい点。</span></li>
+        <li><span class="qn">Q6</span><span>§13 のフェーズ順で着手してよいか。あるいは<strong>まず1銘柄だけのMVP</strong>から見たいか。</span></li>
+      </ul>
+
+      <div class="foot">
+        <div class="disc"><strong>免責：</strong>本システムおよび本システムが出力するレポートは「分析材料の整理」を目的とし、投資助言・売買推奨ではありません。実際の投資判断はすべて利用者ご自身が行うものとします。</div>
+        株式分析システム 設計書 v0.1 ・ ドラフト（承認待ち） ・ 対象市場：日本株（東証）中心 ・ 作成日 2026-08-09<br>
+        この設計が固まるまで、実装コードは書き始めません。
+      </div>
+    </section>
+  </main>
+</div>
+
+<script>
+  (function () {
+    // theme toggle
+    var root = document.documentElement, btn = document.getElementById('themeBtn');
+    function apply(t){ if(t) root.setAttribute('data-theme', t); else root.removeAttribute('data-theme'); }
+    var saved = null; try { saved = localStorage.getItem('sas-theme'); } catch(e){}
+    if (saved) apply(saved);
+    btn.addEventListener('click', function () {
+      var cur = root.getAttribute('data-theme');
+      var isDark = cur ? cur === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+      var next = isDark ? 'light' : 'dark';
+      apply(next);
+      try { localStorage.setItem('sas-theme', next); } catch(e){}
+    });
+
+    // mobile menu
+    var sb = document.getElementById('sidebar'), mb = document.getElementById('menuBtn');
+    mb.addEventListener('click', function(){ sb.classList.toggle('open'); });
+
+    // scroll spy
+    var links = Array.prototype.slice.call(document.querySelectorAll('#toc a'));
+    var map = {};
+    links.forEach(function(a){ map[a.getAttribute('href').slice(1)] = a; });
+    var secs = Array.prototype.slice.call(document.querySelectorAll('section[id]'));
+    var obs = new IntersectionObserver(function(entries){
+      entries.forEach(function(en){
+        if (en.isIntersecting){
+          links.forEach(function(l){ l.classList.remove('active'); });
+          var a = map[en.target.id];
+          if (a){ a.classList.add('active'); }
+        }
+      });
+    }, { rootMargin: '-15% 0px -70% 0px', threshold: 0 });
+    secs.forEach(function(s){ obs.observe(s); });
+
+    // close mobile nav on link click
+    links.forEach(function(a){ a.addEventListener('click', function(){ if (window.innerWidth <= 900) sb.classList.remove('open'); }); });
+  })();
+</script>
