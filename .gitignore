@@ -1,0 +1,6 @@
+node_modules/
+# clasp create で生成される scriptId を含むためコミットしない
+.clasp.json
+.DS_Store
+*.log
+npm-debug.log*
