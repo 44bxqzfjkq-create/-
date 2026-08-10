@@ -2,3 +2,4 @@
 **/**
 !appsscript.json
 !**/*.ts
+!**/*.html

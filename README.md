@@ -1,129 +1,121 @@
-# LINE売上管理システム (GAS + clasp + TypeScript)
+# 受付フォーム & 管理システム (GAS + clasp + TypeScript)
 
-LINE公式アカウントに番号を送ると店舗別の売上をスプレッドシートに記録し、
-リッチメニューからダッシュボード（推移グラフ）を開けるシステムです。
+専用URLの受付フォームからお客さまの希望内容を受け取り、スプレッドシートに記録・管理するシステムです。
+（ダッシュボードでの集計表示は後の段階で追加予定）
 
-## 全体像（作る順番）
+> セキュリティ方針: **パスワード等の認証情報は受け取りません。** 連絡先と希望内容のみを扱います。
 
-段階ごとに動作確認しながら進めます。
+## ロードマップ
 
-1. **clasp環境のセットアップ + スプレッドシート初期化** ← いまここ
-2. Webhook受信とオウム返し（疎通確認）
-3. 番号 → 案内 → 記録のフロー
-4. ダッシュボード（doGet + Chart.js）
-5. リッチメニュー登録
+| Step | 内容 | 状態 |
+|---|---|---|
+| 1 | clasp環境のセットアップ + スプレッドシート初期化 | ✅ |
+| 2 | 受付フォーム（doGetでフォーム表示 → 送信で記録） | ✅ いまここ |
+| 3 | 管理ダッシュボード（件数・金額の推移、今月合計・前月比、スマホ縦） | 予定 |
+| 4 | ステータス管理 / 絞り込み | 予定 |
 
 ---
 
-## ステップ1: 環境構築とスプレッドシート初期化
+## セットアップ（初回のみ）
 
-### 1-1. 必要なもの
-
-- Node.js 18以上（`node -v` で確認）
-- Googleアカウント
-
-### 1-2. 依存パッケージのインストール
+### 1. 依存パッケージ
 
 ```bash
 npm install
 ```
 
-`clasp` / TypeScript の型定義がローカルに入ります。
+### 2. clasp ログイン
 
-### 1-3. Google側で clasp を使えるようにする
-
-初回だけ以下を実施します。
-
-1. [Apps Script API を有効化](https://script.google.com/home/usersettings) → 「Google Apps Script API」をオンにする
-2. claspにログイン
+- [Apps Script API を有効化](https://script.google.com/home/usersettings)（Google Apps Script API をオン）
+- ログイン:
 
 ```bash
 npx clasp login
 ```
 
-ブラウザが開くので、対象のGoogleアカウントで許可してください。
-
-### 1-4. スプレッドシート付きのGASプロジェクトを作成
-
-このシステムは「スプレッドシートに紐づいたスクリプト（コンテナバインド）」として動かします。
-以下のコマンドで、スプレッドシートとスクリプトが同時に作られます。
+### 3. スプレッドシート付きプロジェクトを作成
 
 ```bash
-npx clasp create --type sheets --title "LINE売上管理" --rootDir src
+npx clasp create --type sheets --title "受付管理" --rootDir src
 ```
 
-- 実行すると `.clasp.json` が生成されます（`scriptId` が入る／git管理外）
-- `.clasp.json` の中身が `{"scriptId":"...","rootDir":"src"}` になっていることを確認してください
-  （`rootDir` が入っていなければ `.clasp.json.example` を参考に追記）
+`.clasp.json` が生成されます（`scriptId` を含むため git 管理外）。
+`{"scriptId":"...","rootDir":"src"}` になっているか確認してください。
 
-> `.clasp.json` は個人ごとのIDを含むためコミットしません（`.gitignore` 済み）。
-
-### 1-5. コードをアップロード（push）
+### 4. コードをアップロード
 
 ```bash
-npm run push
-# 中身: clasp push
+npm run push        # clasp push（.ts と .html と appsscript.json を送信）
 ```
 
-`src/` 配下の `.ts` と `appsscript.json` がGASへ送られます。
-（clasp が TypeScript を自動でトランスパイルします）
-
-### 1-6. スプレッドシートを初期化
+### 5. スプレッドシートを初期化
 
 ```bash
-npm run open   # ブラウザでスクリプトエディタが開く
+npm run open        # スクリプトエディタを開く
 ```
 
-スクリプトエディタで:
-
-1. 上部の関数選択プルダウンで **`initSpreadsheet`** を選ぶ
-2. **実行** をクリック
-3. 初回は権限の承認ダイアログが出るので許可する
+エディタで関数 **`initSpreadsheet`** を選び、実行 → 権限承認。
+→ 「受付」シートがヘッダー付きで作成されます。
 
 ---
 
-## ステップ1の動作確認
+## Webアプリとして公開（受付フォームのURL発行）
 
-以下を満たしていればOKです。
+1. スクリプトエディタ右上 **デプロイ → 新しいデプロイ**
+2. 種類 = **ウェブアプリ**
+3. 設定:
+   - 次のユーザーとして実行: **自分**
+   - アクセスできるユーザー: **全員**（客が開けるように）
+4. デプロイ → 表示された **ウェブアプリのURL** が受付フォームのURL
 
-- [ ] `npm install` がエラーなく完了する
-- [ ] `npx clasp create ...` で `.clasp.json` が生成される
-- [ ] `npm run push` が成功する（`Pushed N files.` と表示）
-- [ ] `initSpreadsheet` 実行後、スプレッドシートに **A店 / B店 / C店** の3シートができる
-- [ ] 各シートの1行目が **日時 / 店舗名 / 金額** になっている
-
-スプレッドシート本体は `npx clasp open --addon` ではなく、
-スクリプトエディタ左上の「〈 」やドライブから開けます。
-（`clasp create --type sheets` の出力に Spreadsheet のURLも表示されます）
-
-確認できたら教えてください。**ステップ2（Webhookのオウム返し）** に進みます。
+> コードを更新したら `npm run push` の後、**デプロイ → デプロイを管理 → 編集（鉛筆）→ バージョン: 新バージョン → デプロイ** で反映されます（URLは変わりません）。
 
 ---
 
-## 設定の変更ポイント
+## Step 2 の動作確認
 
-店舗を増やす／変えるときは `src/config.ts` の `STORES` を編集して、
-`initSpreadsheet` を再実行するだけです（既存シートは壊しません）。
+- [ ] `npm run push` が成功する
+- [ ] 発行されたウェブアプリURLをスマホ/ブラウザで開くと受付フォームが表示される
+- [ ] 希望メニュー・数量・金額・連絡先を入れて **送信** すると **受付番号**（例: `T-20260810-001`）が返る
+- [ ] スプレッドシートの「受付」シートに1行追加され、
+      `受付日時 / 受付番号 / 希望メニュー / 数量 / 金額 / 連絡先 / 備考 / ステータス` が入っている
+- [ ] ステータスが「未対応」になっている
+
+確認できたら教えてください。**Step 3（ダッシュボード）** に進みます。
+
+---
+
+## 設定の変更ポイント（`src/config.ts`）
+
+- **メニューと単価**: `MENUS` を編集。単価を入れると金額が「単価×数量」で自動計算されます（0 のままなら手入力）。
 
 ```ts
-STORES: {
-  "1": "A店",
-  "2": "B店",
-  "3": "C店",
-  "4": "D店", // ← 追加してもOK
+MENUS: {
+  "コイン代行": 0,   // ← 単価を入れると自動計算に
+  "スコア代行": 0,
+  "その他": 0,
 },
+```
+
+- メニューを増やす: 行を足すだけ（フォームのプルダウンに自動反映）。
+- 受付番号の接頭辞は `RECEIPT_PREFIX`、初期ステータスは `DEFAULT_STATUS` で変更可。
+
+## フォーム項目（表示順）
+
+```
+受付番号（自動発行）→ 希望メニュー → 数量 → 金額 → 連絡先 → 備考
 ```
 
 ## ディレクトリ構成
 
 ```
 .
-├── package.json         # clasp / TypeScript
-├── tsconfig.json
-├── .claspignore         # push対象の制御
-├── .clasp.json.example  # .clasp.json の雛形（実体はgit管理外）
+├── package.json / tsconfig.json / .claspignore
+├── .clasp.json.example        # .clasp.json の雛形（実体は git 管理外）
 └── src/
-    ├── appsscript.json  # GASマニフェスト（タイムゾーン/Webアプリ設定）
-    ├── config.ts        # 店舗マッピングなどの設定オブジェクト
-    └── setup.ts         # initSpreadsheet（シート初期化）
+    ├── appsscript.json        # マニフェスト（Asia/Tokyo・ウェブアプリ設定）
+    ├── config.ts              # メニュー・列定義などの設定
+    ├── setup.ts               # initSpreadsheet（受付シート初期化）
+    ├── webapp.ts              # doGet（フォーム表示）/ submitOrder（記録）
+    └── form.html              # 受付フォーム（スマホ縦前提のUI）
 ```

@@ -1,33 +1,56 @@
 /**
  * アプリ全体の設定をまとめるオブジェクト。
- * 店舗を増やすときは STORES に「番号: 店舗名」を追加するだけでよい。
- * （店舗名がそのままスプレッドシートのシート名になる）
+ * メニューや単価はここを編集すれば後から増減できる。
+ *
+ * ※パスワードなどの認証情報は「設計として」受け取らない。
+ *   このフォームは連絡先・希望内容のみを受け付ける受付フォーム。
  */
 const CONFIG = {
-  /** LINEで送る番号 → 店舗名（＝記録先シート名）の対応表 */
-  STORES: {
-    "1": "A店",
-    "2": "B店",
-    "3": "C店",
-  } as { [key: string]: string },
+  /**
+   * 希望メニュー → 単価（数量1あたりの金額）。
+   * 単価が決まっていない場合は 0 のままでOK（金額は手入力で上書きできる）。
+   */
+  MENUS: {
+    "コイン代行": 0,
+    "スコア代行": 0,
+    "その他": 0,
+  } as { [name: string]: number },
 
-  /** 各店舗シートのヘッダー行 */
-  HEADER: ["日時", "店舗名", "金額"] as string[],
+  /** 記録先シート名 */
+  SHEET_NAME: "受付",
 
-  /** タイムゾーン（日時の整形・集計に使用） */
+  /** 受付シートのヘッダー（列の並び） */
+  HEADER: [
+    "受付日時",
+    "受付番号",
+    "希望メニュー",
+    "数量",
+    "金額",
+    "連絡先",
+    "備考",
+    "ステータス",
+  ] as string[],
+
+  /** 受付番号の接頭辞（例: T-20260810-001） */
+  RECEIPT_PREFIX: "T",
+
+  /** 新規受付の初期ステータス */
+  DEFAULT_STATUS: "未対応",
+
+  /** タイムゾーン */
   TIMEZONE: "Asia/Tokyo",
 
-  /** ダッシュボードのタイトル */
-  DASHBOARD_TITLE: "売上ダッシュボード",
+  /** 画面タイトル */
+  APP_TITLE: "受付フォーム",
 };
 
-/** 番号から店舗名を引く。存在しなければ null。 */
-function getStoreName(number: string): string | null {
-  const name = CONFIG.STORES[number.trim()];
-  return name ? name : null;
+/** メニュー名の一覧を返す。 */
+function getMenuNames(): string[] {
+  return Object.keys(CONFIG.MENUS);
 }
 
-/** 全店舗名の配列を返す。 */
-function getAllStoreNames(): string[] {
-  return Object.keys(CONFIG.STORES).map((k) => CONFIG.STORES[k]);
+/** メニューの単価を返す。未定義なら 0。 */
+function getMenuPrice(name: string): number {
+  const p = CONFIG.MENUS[name];
+  return typeof p === "number" ? p : 0;
 }
