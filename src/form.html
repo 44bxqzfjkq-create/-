@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <base target="_top" />
+    <meta charset="utf-8" />
+    <style>
+      :root {
+        --bg: #f5f6f8;
+        --card: #ffffff;
+        --line: #e3e6ea;
+        --text: #1f2933;
+        --sub: #66727f;
+        --accent: #2f7d32;
+        --accent-d: #266a29;
+        --danger: #c0392b;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family: -apple-system, "Hiragino Kaku Gothic ProN", "Yu Gothic",
+          Meiryo, sans-serif;
+        line-height: 1.6;
+      }
+      .wrap {
+        max-width: 480px;
+        margin: 0 auto;
+        padding: 16px 14px 40px;
+      }
+      h1 {
+        font-size: 20px;
+        margin: 8px 4px 4px;
+      }
+      .lead {
+        color: var(--sub);
+        font-size: 13px;
+        margin: 0 4px 16px;
+      }
+      .card {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 16px;
+      }
+      .field { margin-bottom: 16px; }
+      label {
+        display: block;
+        font-size: 14px;
+        font-weight: 600;
+        margin-bottom: 6px;
+      }
+      label .req { color: var(--danger); font-size: 12px; margin-left: 4px; }
+      label .opt { color: var(--sub); font-size: 12px; margin-left: 4px; }
+      input, select, textarea {
+        width: 100%;
+        padding: 12px;
+        font-size: 16px; /* iOSの自動ズーム防止 */
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fff;
+        color: var(--text);
+      }
+      textarea { min-height: 80px; resize: vertical; }
+      .hint { font-size: 12px; color: var(--sub); margin-top: 6px; }
+      .receipt-note {
+        background: #eef6ee;
+        border: 1px dashed #b7d7b8;
+        color: var(--accent-d);
+        border-radius: 8px;
+        padding: 10px 12px;
+        font-size: 13px;
+      }
+      button {
+        width: 100%;
+        padding: 14px;
+        font-size: 16px;
+        font-weight: 700;
+        color: #fff;
+        background: var(--accent);
+        border: none;
+        border-radius: 10px;
+        cursor: pointer;
+      }
+      button:disabled { opacity: 0.6; cursor: default; }
+      .msg { margin-top: 14px; font-size: 14px; }
+      .msg.error { color: var(--danger); }
+      .done {
+        text-align: center;
+        padding: 20px 8px;
+      }
+      .done .big {
+        font-size: 22px;
+        font-weight: 800;
+        letter-spacing: 0.02em;
+        margin: 10px 0;
+        color: var(--accent-d);
+      }
+      .done .num {
+        display: inline-block;
+        background: #eef6ee;
+        border-radius: 8px;
+        padding: 6px 14px;
+        font-size: 20px;
+        font-weight: 800;
+      }
+      .link {
+        display: inline-block;
+        margin-top: 18px;
+        color: var(--accent-d);
+        font-size: 14px;
+        text-decoration: underline;
+        cursor: pointer;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1><?= appTitle ?></h1>
+      <p class="lead">
+        ご希望内容をご記入ください。<br />
+        ※ゲームやSNSのパスワードは入力しないでください（お預かりしません）。
+      </p>
+
+      <!-- 入力フォーム -->
+      <div class="card" id="formCard">
+        <!-- 1. 受付番号（自動発行） -->
+        <div class="field">
+          <label>受付番号</label>
+          <div class="receipt-note">
+            送信後に自動で発行されます（例: T-YYYYMMDD-001）。
+          </div>
+        </div>
+
+        <!-- 3. 希望メニュー -->
+        <div class="field">
+          <label for="menu">希望メニュー<span class="req">必須</span></label>
+          <select id="menu"></select>
+        </div>
+
+        <!-- 4. 数量・希望値 -->
+        <div class="field">
+          <label for="qty">数量・希望値<span class="req">必須</span></label>
+          <input id="qty" type="number" inputmode="numeric" min="1" step="1" value="1" />
+          <div class="hint">例: コイン◯万枚 / スコア◯万点 など</div>
+        </div>
+
+        <!-- 5. 金額 -->
+        <div class="field">
+          <label for="amount">金額<span class="req">必須</span></label>
+          <input id="amount" type="number" inputmode="numeric" min="0" step="1" value="0" />
+          <div class="hint">メニュー×数量で自動計算されます（手入力で変更可）。</div>
+        </div>
+
+        <!-- 2. 連絡先 -->
+        <div class="field">
+          <label for="contact">連絡先<span class="req">必須</span></label>
+          <input id="contact" type="text" placeholder="LINEの表示名 または メールアドレス" />
+          <div class="hint">連絡が取れる情報をご記入ください。</div>
+        </div>
+
+        <!-- 7. 備考 -->
+        <div class="field">
+          <label for="note">備考<span class="opt">任意</span></label>
+          <textarea id="note" placeholder="ご要望・ご質問など"></textarea>
+        </div>
+
+        <!-- 支払い写真 -->
+        <div class="field">
+          <label for="photo">支払いの写真<span class="opt" id="photoOpt">任意</span></label>
+          <input id="photo" type="file" accept="image/*" capture="environment" />
+          <div class="hint">振込・決済のスクリーンショットなど。送信前に自動で縮小されます。</div>
+          <img id="preview" alt="プレビュー"
+               style="display:none;max-width:100%;margin-top:10px;border:1px solid var(--line);border-radius:8px;" />
+        </div>
+
+        <button id="submitBtn" onclick="onSubmit()">送信する</button>
+        <div class="msg" id="msg"></div>
+      </div>
+
+      <!-- 送信完了 -->
+      <div class="card done" id="doneCard" style="display: none">
+        <div>受付を承りました ✅</div>
+        <div class="big">受付番号</div>
+        <div class="num" id="doneNo">-</div>
+        <p class="lead" style="margin-top: 16px">
+          担当より連絡いたします。番号はお控えください。
+        </p>
+        <span class="link" onclick="resetForm()">続けて入力する</span>
+      </div>
+    </div>
+
+    <script>
+      // サーバーから受け取った値
+      var MENUS = <?!= menusJson ?>;
+      var REQUIRE_PHOTO = <?!= requirePhoto ?>;
+
+      // 支払い写真（リサイズ後のデータURLを保持）
+      var photoData = null; // { dataUrl, name } または null
+
+      if (REQUIRE_PHOTO) {
+        document.getElementById("photoOpt").textContent = "必須";
+        document.getElementById("photoOpt").className = "req";
+      }
+
+      // 画像を選んだら縮小してプレビュー
+      document.getElementById("photo").addEventListener("change", function (e) {
+        var file = e.target.files && e.target.files[0];
+        photoData = null;
+        var preview = document.getElementById("preview");
+        preview.style.display = "none";
+        if (!file) return;
+        if (file.type.indexOf("image/") !== 0) {
+          setMsg("画像ファイルを選んでください。", true);
+          return;
+        }
+        var reader = new FileReader();
+        reader.onload = function (ev) {
+          var img = new Image();
+          img.onload = function () {
+            // 長辺1600pxに縮小し JPEG(品質0.8) に変換
+            var MAX = 1600;
+            var w = img.width, h = img.height;
+            if (w > MAX || h > MAX) {
+              if (w >= h) { h = Math.round((h * MAX) / w); w = MAX; }
+              else { w = Math.round((w * MAX) / h); h = MAX; }
+            }
+            var canvas = document.createElement("canvas");
+            canvas.width = w; canvas.height = h;
+            canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+            var dataUrl = canvas.toDataURL("image/jpeg", 0.8);
+            photoData = { dataUrl: dataUrl, name: file.name || "payment.jpg" };
+            preview.src = dataUrl;
+            preview.style.display = "block";
+            setMsg("");
+          };
+          img.src = ev.target.result;
+        };
+        reader.readAsDataURL(file);
+      });
+
+      // メニュー選択肢を生成
+      (function initMenu() {
+        var sel = document.getElementById("menu");
+        Object.keys(MENUS).forEach(function (name) {
+          var op = document.createElement("option");
+          op.value = name;
+          op.textContent = name;
+          sel.appendChild(op);
+        });
+      })();
+
+      // 金額の自動計算（メニュー・数量が変わったら再計算）
+      function recalc() {
+        var menu = document.getElementById("menu").value;
+        var qty = Number(document.getElementById("qty").value) || 0;
+        var unit = Number(MENUS[menu]) || 0;
+        if (unit > 0) {
+          document.getElementById("amount").value = unit * qty;
+        }
+      }
+      document.getElementById("menu").addEventListener("change", recalc);
+      document.getElementById("qty").addEventListener("input", recalc);
+      recalc();
+
+      function setMsg(text, isError) {
+        var m = document.getElementById("msg");
+        m.textContent = text || "";
+        m.className = "msg" + (isError ? " error" : "");
+      }
+
+      function onSubmit() {
+        var input = {
+          menu: document.getElementById("menu").value,
+          qty: document.getElementById("qty").value,
+          amount: document.getElementById("amount").value,
+          contact: document.getElementById("contact").value,
+          note: document.getElementById("note").value,
+          image: photoData, // 未選択なら null
+        };
+
+        // 簡易チェック（本チェックはサーバー側でも実施）
+        if (!input.contact.trim()) {
+          setMsg("連絡先を入力してください。", true);
+          return;
+        }
+        if (!(Number(input.qty) > 0)) {
+          setMsg("数量は1以上で入力してください。", true);
+          return;
+        }
+        if (REQUIRE_PHOTO && !photoData) {
+          setMsg("支払いの写真を添付してください。", true);
+          return;
+        }
+
+        var btn = document.getElementById("submitBtn");
+        btn.disabled = true;
+        btn.textContent = "送信中...";
+        setMsg("");
+
+        google.script.run
+          .withSuccessHandler(function (res) {
+            if (res && res.ok) {
+              document.getElementById("doneNo").textContent = res.receiptNo;
+              document.getElementById("formCard").style.display = "none";
+              document.getElementById("doneCard").style.display = "block";
+              window.scrollTo(0, 0);
+            } else {
+              setMsg((res && res.message) || "送信に失敗しました。", true);
+              btn.disabled = false;
+              btn.textContent = "送信する";
+            }
+          })
+          .withFailureHandler(function (err) {
+            setMsg("通信エラー: " + (err && err.message ? err.message : err), true);
+            btn.disabled = false;
+            btn.textContent = "送信する";
+          })
+          .submitOrder(input);
+      }
+
+      function resetForm() {
+        document.getElementById("qty").value = 1;
+        document.getElementById("amount").value = 0;
+        document.getElementById("contact").value = "";
+        document.getElementById("note").value = "";
+        document.getElementById("menu").selectedIndex = 0;
+        document.getElementById("photo").value = "";
+        document.getElementById("preview").style.display = "none";
+        photoData = null;
+        recalc();
+        document.getElementById("doneCard").style.display = "none";
+        document.getElementById("formCard").style.display = "block";
+        setMsg("");
+        var btn = document.getElementById("submitBtn");
+        btn.disabled = false;
+        btn.textContent = "送信する";
+      }
+    </script>
+  </body>
+</html>

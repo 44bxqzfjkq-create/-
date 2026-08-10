@@ -1,0 +1,5 @@
+# clasp push で送るファイルを制御する（rootDir=src 配下のみ）
+**/**
+!appsscript.json
+!**/*.ts
+!**/*.html
