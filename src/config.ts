@@ -28,8 +28,15 @@ const CONFIG = {
     "金額",
     "連絡先",
     "備考",
+    "支払い写真",
     "ステータス",
   ] as string[],
+
+  /** 支払い写真の保存先（Googleドライブのフォルダ名。無ければ自動作成） */
+  PHOTO_FOLDER_NAME: "受付_支払い写真",
+
+  /** 支払い写真を必須にするか（true=必須 / false=任意） */
+  REQUIRE_PHOTO: false,
 
   /** 受付番号の接頭辞（例: T-20260810-001） */
   RECEIPT_PREFIX: "T",

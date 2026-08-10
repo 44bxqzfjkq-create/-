@@ -2,22 +2,29 @@
  * 受付フォームのWebアプリ本体。
  * - doGet: フォームHTMLを返す（客が開くページ）
  * - submitOrder: フォームから呼ばれ、受付内容をスプレッドシートに記録する
+ *   （支払い写真があればドライブに保存し、リンクを記録）
  *
- * ※認証情報（パスワード等）は受け取らない。連絡先と希望内容のみ。
+ * ※認証情報（パスワード等）は受け取らない。連絡先・希望内容・支払い写真のみ。
  */
 
 /** Webアプリのエントリポイント。フォームHTMLを返す。 */
 function doGet(): GoogleAppsScript.HTML.HtmlOutput {
   const template = HtmlService.createTemplateFromFile("form");
-  // クライアント側へ渡す値
   template.menusJson = JSON.stringify(CONFIG.MENUS);
   template.appTitle = CONFIG.APP_TITLE;
+  template.requirePhoto = CONFIG.REQUIRE_PHOTO ? "true" : "false";
 
   return template
     .evaluate()
     .setTitle(CONFIG.APP_TITLE)
     .addMetaTag("viewport", "width=device-width, initial-scale=1")
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
+
+/** 添付画像（フォームから base64 のデータURLで届く） */
+interface ImageInput {
+  dataUrl: string; // 例: "data:image/jpeg;base64,...."
+  name: string; // 元ファイル名（任意）
 }
 
 /** フォーム送信の入力型 */
@@ -27,6 +34,7 @@ interface OrderInput {
   amount: number | string;
   contact: string;
   note: string;
+  image?: ImageInput | null;
 }
 
 /** 送信結果の返却型 */
@@ -70,7 +78,12 @@ function submitOrder(input: OrderInput): OrderResult {
     return { ok: false, message: "金額を正しく入力してください。" };
   }
 
-  // ---- 記録 ----
+  const hasImage = !!(input.image && input.image.dataUrl);
+  if (CONFIG.REQUIRE_PHOTO && !hasImage) {
+    return { ok: false, message: "支払いの写真を添付してください。" };
+  }
+
+  // ---- 採番 ----
   const now = new Date();
   const receiptNo = generateReceiptNo(sheet, now);
   const timestamp = Utilities.formatDate(
@@ -79,19 +92,73 @@ function submitOrder(input: OrderInput): OrderResult {
     "yyyy/MM/dd HH:mm:ss"
   );
 
-  // HEADER の並びに合わせて1行追加
-  sheet.appendRow([
-    timestamp, // 受付日時
-    receiptNo, // 受付番号
-    menu, // 希望メニュー
-    qty, // 数量
-    amount, // 金額
-    contact, // 連絡先
-    note, // 備考
-    CONFIG.DEFAULT_STATUS, // ステータス
-  ]);
+  // ---- 支払い写真を保存（あれば） ----
+  let photoUrl = "";
+  if (hasImage) {
+    try {
+      photoUrl = savePhotoToDrive(input.image as ImageInput, receiptNo);
+    } catch (e) {
+      return {
+        ok: false,
+        message:
+          "写真の保存に失敗しました。時間をおいて再度お試しください。（" +
+          (e && (e as Error).message ? (e as Error).message : e) +
+          "）",
+      };
+    }
+  }
+
+  // ---- HEADER の並びに合わせて1行を組み立てて追記 ----
+  const record: { [col: string]: string | number } = {
+    受付日時: timestamp,
+    受付番号: receiptNo,
+    希望メニュー: menu,
+    数量: qty,
+    金額: amount,
+    連絡先: contact,
+    備考: note,
+    支払い写真: photoUrl,
+    ステータス: CONFIG.DEFAULT_STATUS,
+  };
+  const row = CONFIG.HEADER.map((col) =>
+    record[col] !== undefined ? record[col] : ""
+  );
+  sheet.appendRow(row);
 
   return { ok: true, receiptNo: receiptNo };
+}
+
+/**
+ * 支払い写真（データURL）をGoogleドライブに保存し、閲覧URLを返す。
+ * 保存先フォルダは CONFIG.PHOTO_FOLDER_NAME（無ければ作成）。
+ */
+function savePhotoToDrive(image: ImageInput, receiptNo: string): string {
+  const match = /^data:([^;]+);base64,(.+)$/.exec(image.dataUrl || "");
+  if (!match) {
+    throw new Error("画像データの形式が不正です。");
+  }
+  const mimeType = match[1];
+  const base64 = match[2];
+  const bytes = Utilities.base64Decode(base64);
+
+  // 拡張子
+  const ext = mimeType.indexOf("png") >= 0 ? "png" : "jpg";
+  const filename = receiptNo + "_payment." + ext;
+
+  const blob = Utilities.newBlob(bytes, mimeType, filename);
+  const folder = getOrCreatePhotoFolder();
+  const file = folder.createFile(blob);
+  return file.getUrl();
+}
+
+/** 支払い写真フォルダを取得（無ければ作成）。 */
+function getOrCreatePhotoFolder(): GoogleAppsScript.Drive.Folder {
+  const name = CONFIG.PHOTO_FOLDER_NAME;
+  const it = DriveApp.getFoldersByName(name);
+  if (it.hasNext()) {
+    return it.next();
+  }
+  return DriveApp.createFolder(name);
 }
 
 /**
@@ -104,7 +171,6 @@ function generateReceiptNo(
   const dateStr = Utilities.formatDate(now, CONFIG.TIMEZONE, "yyyyMMdd");
   const prefix = CONFIG.RECEIPT_PREFIX + "-" + dateStr + "-";
 
-  // 受付番号列（HEADERの位置から算出）
   const noCol = CONFIG.HEADER.indexOf("受付番号") + 1;
   const lastRow = sheet.getLastRow();
 

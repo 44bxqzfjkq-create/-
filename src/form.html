@@ -165,6 +165,15 @@
           <textarea id="note" placeholder="ご要望・ご質問など"></textarea>
         </div>
 
+        <!-- 支払い写真 -->
+        <div class="field">
+          <label for="photo">支払いの写真<span class="opt" id="photoOpt">任意</span></label>
+          <input id="photo" type="file" accept="image/*" capture="environment" />
+          <div class="hint">振込・決済のスクリーンショットなど。送信前に自動で縮小されます。</div>
+          <img id="preview" alt="プレビュー"
+               style="display:none;max-width:100%;margin-top:10px;border:1px solid var(--line);border-radius:8px;" />
+        </div>
+
         <button id="submitBtn" onclick="onSubmit()">送信する</button>
         <div class="msg" id="msg"></div>
       </div>
@@ -182,8 +191,53 @@
     </div>
 
     <script>
-      // サーバーから受け取ったメニューと単価
+      // サーバーから受け取った値
       var MENUS = <?!= menusJson ?>;
+      var REQUIRE_PHOTO = <?!= requirePhoto ?>;
+
+      // 支払い写真（リサイズ後のデータURLを保持）
+      var photoData = null; // { dataUrl, name } または null
+
+      if (REQUIRE_PHOTO) {
+        document.getElementById("photoOpt").textContent = "必須";
+        document.getElementById("photoOpt").className = "req";
+      }
+
+      // 画像を選んだら縮小してプレビュー
+      document.getElementById("photo").addEventListener("change", function (e) {
+        var file = e.target.files && e.target.files[0];
+        photoData = null;
+        var preview = document.getElementById("preview");
+        preview.style.display = "none";
+        if (!file) return;
+        if (file.type.indexOf("image/") !== 0) {
+          setMsg("画像ファイルを選んでください。", true);
+          return;
+        }
+        var reader = new FileReader();
+        reader.onload = function (ev) {
+          var img = new Image();
+          img.onload = function () {
+            // 長辺1600pxに縮小し JPEG(品質0.8) に変換
+            var MAX = 1600;
+            var w = img.width, h = img.height;
+            if (w > MAX || h > MAX) {
+              if (w >= h) { h = Math.round((h * MAX) / w); w = MAX; }
+              else { w = Math.round((w * MAX) / h); h = MAX; }
+            }
+            var canvas = document.createElement("canvas");
+            canvas.width = w; canvas.height = h;
+            canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+            var dataUrl = canvas.toDataURL("image/jpeg", 0.8);
+            photoData = { dataUrl: dataUrl, name: file.name || "payment.jpg" };
+            preview.src = dataUrl;
+            preview.style.display = "block";
+            setMsg("");
+          };
+          img.src = ev.target.result;
+        };
+        reader.readAsDataURL(file);
+      });
 
       // メニュー選択肢を生成
       (function initMenu() {
@@ -222,6 +276,7 @@
           amount: document.getElementById("amount").value,
           contact: document.getElementById("contact").value,
           note: document.getElementById("note").value,
+          image: photoData, // 未選択なら null
         };
 
         // 簡易チェック（本チェックはサーバー側でも実施）
@@ -231,6 +286,10 @@
         }
         if (!(Number(input.qty) > 0)) {
           setMsg("数量は1以上で入力してください。", true);
+          return;
+        }
+        if (REQUIRE_PHOTO && !photoData) {
+          setMsg("支払いの写真を添付してください。", true);
           return;
         }
 
@@ -266,6 +325,9 @@
         document.getElementById("contact").value = "";
         document.getElementById("note").value = "";
         document.getElementById("menu").selectedIndex = 0;
+        document.getElementById("photo").value = "";
+        document.getElementById("preview").style.display = "none";
+        photoData = null;
         recalc();
         document.getElementById("doneCard").style.display = "none";
         document.getElementById("formCard").style.display = "block";
