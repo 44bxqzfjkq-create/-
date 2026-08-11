@@ -165,8 +165,11 @@ function rfMaybeSend(sheet, row) {
   const menuVal = String(sheet.getRange(row, RF_CONFIG.COL.希望メニュー).getValue());
   const isPriority = menuVal.indexOf(RF_CONFIG.PRIORITY_KEYWORD) >= 0;
 
+  // 受付完了時刻（日本時間）
+  const uketsukeTime = Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy/MM/dd (E) HH:mm');
+
   const header = isPriority ? '🔴【優先依頼】' : '🆕 新しい依頼';
-  const message = header + '\n' + parts.join('\n');
+  const message = header + '\n受付時刻：' + uketsukeTime + '\n' + parts.join('\n');
   const url = isPriority ? RF_CONFIG.WEBHOOK_PRIORITY : RF_CONFIG.WEBHOOK_NORMAL;
 
   let ok = false, errMsg = '';
