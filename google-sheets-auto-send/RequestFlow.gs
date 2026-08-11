@@ -108,10 +108,22 @@ function rfInstallTriggers() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   ScriptApp.getProjectTriggers().forEach(function (t) {
     const fn = t.getHandlerFunction();
-    if (fn === 'rfOnEdit' || fn === 'rfOnOpen') ScriptApp.deleteTrigger(t);
+    if (fn === 'rfOnEdit' || fn === 'rfOnOpen' || fn === 'rfScan') ScriptApp.deleteTrigger(t);
   });
   ScriptApp.newTrigger('rfOnEdit').forSpreadsheet(ss).onEdit().create();
   ScriptApp.newTrigger('rfOnOpen').forSpreadsheet(ss).onOpen().create();
+  // Googleフォーム等の自動記入はonEditが反応しないため、1分ごとにシートを走査して送る
+  ScriptApp.newTrigger('rfScan').timeBased().everyMinutes(1).create();
+}
+
+// シート全体を走査し、必須がそろって未送信の行を送る（フォーム記入などを拾う）
+function rfScan() {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(RF_CONFIG.SHEET_NAME);
+  if (!sheet) return;
+  const last = sheet.getLastRow();
+  for (var row = RF_CONFIG.HEADER_ROW + 1; row <= last; row++) {
+    rfMaybeSend(sheet, row);
+  }
 }
 
 // ==================================================================
