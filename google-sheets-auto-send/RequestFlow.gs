@@ -1,15 +1,20 @@
 /**
- * 依頼フロー自動化（Discord通知 ＋ 優先チャンネル振り分け ＋ 完了で行削除）
+ * 依頼フロー自動化（Discord通知 ＋ 優先チャンネル振り分け ＋ 完了でDiscordメッセージ削除）
  * ==================================================================
  * 動き：
  *   1. 新しい依頼がシートに入り、必須項目がそろうと → 自動でDiscordに通知
  *      - 希望メニューが「依頼優先権」を含む → 優先チャンネルへ
  *      - それ以外 → 通常チャンネルへ
- *   2. I列（ステータス）のチェックを入れる → その行を削除（前の依頼は残らない）
+ *      - 送ったDiscordメッセージのIDを内部列に記録しておく
+ *   2. I列（ステータス）にチェック（または「完了」入力）→
+ *      - Discordに送ったメッセージを削除
+ *      - スプレッドシートは行を残し、I列に「完了 ＋ 時刻」を記録
+ *      （＝スプレッドシートの記録は残る／Discord側だけ消える）
  *
  * 列の対応（この設定で固定）：
  *   B=受付番号 / C=希望メニュー / E=金額 / F=連絡先 / G=備考 / H=写真 / I=ステータス
- *   K列 … 送信済みフラグ（重複送信を防ぐための内部用。隠してOK）
+ *   K列 … 送信済みフラグ（内部用・隠す）
+ *   L列 … DiscordメッセージID（内部用・隠す）
  *
  * 導入：
  *   1. Apps Script にこのコードを貼る
@@ -51,6 +56,7 @@ const RF_CONFIG = {
   FIELDS: ['受付番号', '希望メニュー', '金額', '連絡先', '備考', '写真'],
 
   SENT_FLAG_COL: 11, // K列（送信済みフラグ・内部用）
+  MSG_ID_COL: 12,    // L列（DiscordメッセージID・内部用）
   CHECKBOX_ROWS: 1000,
 };
 
@@ -87,9 +93,11 @@ function rfSetup() {
     sheet.getRange(startRow, RF_CONFIG.COL.ステータス, n, 1).insertCheckboxes();
   }
 
-  // K列（送信済みフラグ）の見出しを付けて列を隠す
+  // 内部用の列（送信済みフラグ・メッセージID）に見出しを付けて隠す
   sheet.getRange(RF_CONFIG.HEADER_ROW, RF_CONFIG.SENT_FLAG_COL).setValue('送信済(内部用)');
+  sheet.getRange(RF_CONFIG.HEADER_ROW, RF_CONFIG.MSG_ID_COL).setValue('msgID(内部用)');
   sheet.hideColumns(RF_CONFIG.SENT_FLAG_COL);
+  sheet.hideColumns(RF_CONFIG.MSG_ID_COL);
 
   rfInstallTriggers();
 
@@ -118,18 +126,15 @@ function rfOnEdit(e) {
   const row = range.getRow();
   if (row <= RF_CONFIG.HEADER_ROW) return;
 
-  const editedCol = range.getColumn();
-  const numCols = range.getNumColumns();
-  const colStart = editedCol;
-  const colEnd = editedCol + numCols - 1;
+  const colStart = range.getColumn();
+  const colEnd = colStart + range.getNumColumns() - 1;
 
-  // (1) ステータス（I列）が変わった → 完了なら行削除
+  // (1) ステータス（I列）が変わった → 完了処理（Discord削除＋完了記録・行は残す）
   const statusCol = RF_CONFIG.COL.ステータス;
   if (statusCol >= colStart && statusCol <= colEnd) {
     const statusVal = sheet.getRange(row, statusCol).getValue();
     if (statusVal === true || String(statusVal).indexOf('完了') >= 0) {
-      sheet.deleteRow(row);
-      SpreadsheetApp.getActiveSpreadsheet().toast('依頼完了：行を削除しました。', '完了', 3);
+      rfComplete(sheet, row);
       return;
     }
   }
@@ -140,7 +145,6 @@ function rfOnEdit(e) {
 
 // 必須項目がそろっていて未送信なら送る
 function rfMaybeSend(sheet, row) {
-  // すでに送信済みならスキップ
   const flagCell = sheet.getRange(row, RF_CONFIG.SENT_FLAG_COL);
   if (String(flagCell.getValue()) === 'sent') return;
 
@@ -172,21 +176,51 @@ function rfMaybeSend(sheet, row) {
   const message = header + '\n受付時刻：' + uketsukeTime + '\n' + parts.join('\n');
   const url = isPriority ? RF_CONFIG.WEBHOOK_PRIORITY : RF_CONFIG.WEBHOOK_NORMAL;
 
-  let ok = false, errMsg = '';
+  let result = { ok: false, id: '' };
+  let errMsg = '';
   try {
-    ok = rfPost(url, message);
+    result = rfPost(url, message);
   } catch (err) {
     errMsg = err && err.message ? err.message : String(err);
   }
 
-  if (ok) {
+  if (result.ok) {
     flagCell.setValue('sent'); // 二重送信防止
+    sheet.getRange(row, RF_CONFIG.MSG_ID_COL).setValue(result.id); // 削除用にID保存
     SpreadsheetApp.getActiveSpreadsheet().toast(
       (isPriority ? '優先' : '通常') + 'チャンネルに送信しました。', '送信完了', 3);
   } else {
     SpreadsheetApp.getActiveSpreadsheet().toast(
       '送信に失敗しました。Webhook設定を確認してください。' + (errMsg ? '（' + errMsg + '）' : ''), 'エラー', 8);
   }
+}
+
+// 完了処理：Discordメッセージを削除し、行は残して「完了＋時刻」を記録
+function rfComplete(sheet, row) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const msgCell = sheet.getRange(row, RF_CONFIG.MSG_ID_COL);
+  const messageId = String(msgCell.getValue());
+
+  // 優先判定（行は残っているので希望メニューから判定）
+  const menuVal = String(sheet.getRange(row, RF_CONFIG.COL.希望メニュー).getValue());
+  const isPriority = menuVal.indexOf(RF_CONFIG.PRIORITY_KEYWORD) >= 0;
+  const url = isPriority ? RF_CONFIG.WEBHOOK_PRIORITY : RF_CONFIG.WEBHOOK_NORMAL;
+
+  // Discordメッセージを削除
+  let delOk = true;
+  if (messageId) {
+    try { delOk = rfDeleteMessage(url, messageId); } catch (e) { delOk = false; }
+  }
+
+  // 完了時刻を記録（行は残す）
+  const doneTime = Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy/MM/dd (E) HH:mm');
+  sheet.getRange(row, RF_CONFIG.COL.ステータス).setValue('完了 ' + doneTime);
+  msgCell.setValue(''); // 二度押し防止（IDを消す）
+
+  ss.toast(
+    delOk ? 'Discordのメッセージを削除し、完了を記録しました。'
+          : '完了を記録しました（Discordメッセージの削除は失敗）。',
+    '完了', 4);
 }
 
 // ==================================================================
@@ -203,24 +237,41 @@ function rfSafe(v) {
   return String(v);
 }
 
+// 送信：?wait=true でメッセージIDを受け取る → {ok, id}
 function rfPost(url, text) {
   if (!url || url.indexOf('http') !== 0) throw new Error('Webhook URL が未設定です');
-  const res = UrlFetchApp.fetch(url, {
+  const res = UrlFetchApp.fetch(url + '?wait=true', {
     method: 'post',
     contentType: 'application/json',
     payload: JSON.stringify({ content: text }),
     muteHttpExceptions: true,
   });
   const code = res.getResponseCode();
-  return code >= 200 && code < 300;
+  const ok = code >= 200 && code < 300;
+  let id = '';
+  if (ok) {
+    try { id = String(JSON.parse(res.getContentText()).id || ''); } catch (e) { id = ''; }
+  }
+  return { ok: ok, id: id };
+}
+
+// 削除：Webhookで送ったメッセージをIDを指定して消す
+function rfDeleteMessage(url, messageId) {
+  if (!url || !messageId) return false;
+  const res = UrlFetchApp.fetch(url + '/messages/' + messageId, {
+    method: 'delete',
+    muteHttpExceptions: true,
+  });
+  const code = res.getResponseCode();
+  return code >= 200 && code < 300; // 成功は 204
 }
 
 function rfTestNormal() {
-  const ok = rfPost(RF_CONFIG.WEBHOOK_NORMAL, '✅ 通常チャンネルの接続テストです。');
-  SpreadsheetApp.getActiveSpreadsheet().toast(ok ? '通常チャンネルに送信成功' : '送信失敗（URLを確認）', 'テスト', 5);
+  const r = rfPost(RF_CONFIG.WEBHOOK_NORMAL, '✅ 通常チャンネルの接続テストです。');
+  SpreadsheetApp.getActiveSpreadsheet().toast(r.ok ? '通常チャンネルに送信成功' : '送信失敗（URLを確認）', 'テスト', 5);
 }
 
 function rfTestPriority() {
-  const ok = rfPost(RF_CONFIG.WEBHOOK_PRIORITY, '🔴 優先チャンネルの接続テストです。');
-  SpreadsheetApp.getActiveSpreadsheet().toast(ok ? '優先チャンネルに送信成功' : '送信失敗（URLを確認）', 'テスト', 5);
+  const r = rfPost(RF_CONFIG.WEBHOOK_PRIORITY, '🔴 優先チャンネルの接続テストです。');
+  SpreadsheetApp.getActiveSpreadsheet().toast(r.ok ? '優先チャンネルに送信成功' : '送信失敗（URLを確認）', 'テスト', 5);
 }
