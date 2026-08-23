@@ -1,0 +1,1113 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FX 入門ラボ</title>
+<style>
+  :root {
+    --bg: #0f0f1a;
+    --panel: #1a1a2e;
+    --panel2: #14142a;
+    --border: #2d2d44;
+    --text: #e0e0f0;
+    --muted: #8888aa;
+    --accent: #4ade80;
+    --up: #4ade80;
+    --down: #f87171;
+    --warn: #fbbf24;
+    --link: #60a5fa;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    line-height: 1.75;
+    padding: 16px;
+    -webkit-text-size-adjust: 100%;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; }
+  header { padding: 8px 0 20px; }
+  h1 { font-size: 26px; letter-spacing: 1px; }
+  h1 .sub { display: block; font-size: 13px; color: var(--muted); font-weight: 400; letter-spacing: 0; margin-top: 4px; }
+
+  nav {
+    display: flex; flex-wrap: wrap; gap: 6px;
+    position: sticky; top: 0; z-index: 10;
+    background: var(--bg); padding: 8px 0; margin-bottom: 20px;
+    border-bottom: 1px solid var(--border);
+  }
+  nav button {
+    background: var(--panel); color: var(--muted);
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 7px 12px; font-size: 13px; cursor: pointer;
+    font-family: inherit; transition: .15s;
+  }
+  nav button:hover { color: var(--text); border-color: #3d3d5c; }
+  nav button.active { background: var(--accent); color: #08080f; border-color: var(--accent); font-weight: 600; }
+
+  section { display: none; animation: fade .2s ease; }
+  section.active { display: block; }
+  @keyframes fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+  h2 { font-size: 19px; margin: 28px 0 10px; color: var(--accent); }
+  h2:first-child { margin-top: 0; }
+  h3 { font-size: 15px; margin: 20px 0 6px; color: #c0c0e0; }
+  p { margin: 8px 0; }
+  ul, ol { margin: 8px 0 8px 22px; }
+  li { margin: 4px 0; }
+  code { background: #08080f; padding: 2px 6px; border-radius: 4px; font-size: 13px; color: var(--warn); }
+  strong { color: #fff; }
+  .muted { color: var(--muted); font-size: 13px; }
+
+  .card {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 8px; padding: 16px; margin: 14px 0;
+  }
+  .card > h3:first-child { margin-top: 0; }
+  .note {
+    border-left: 3px solid var(--warn); background: var(--panel2);
+    padding: 10px 14px; margin: 14px 0; border-radius: 0 6px 6px 0; font-size: 14px;
+  }
+  .note.danger { border-left-color: var(--down); }
+  .note.good { border-left-color: var(--accent); }
+
+  table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 14px; }
+  th, td { border: 1px solid var(--border); padding: 8px 10px; text-align: left; }
+  th { background: var(--panel2); color: var(--muted); font-weight: 600; font-size: 13px; }
+  .scroll { overflow-x: auto; }
+
+  label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 3px; }
+  input, select {
+    width: 100%; background: #08080f; color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 8px 10px; font-size: 14px; font-family: inherit;
+  }
+  input:focus, select:focus { outline: none; border-color: var(--accent); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+  .btn {
+    background: var(--panel2); color: var(--text); border: 1px solid var(--border);
+    border-radius: 6px; padding: 9px 16px; font-size: 14px; cursor: pointer; font-family: inherit;
+  }
+  .btn:hover { border-color: var(--accent); }
+  .btn.buy { background: #14532d; border-color: var(--up); color: #d1fae5; }
+  .btn.sell { background: #4c1d1d; border-color: var(--down); color: #fee2e2; }
+  .btn:disabled { opacity: .4; cursor: not-allowed; }
+
+  .out { background: #08080f; border: 1px solid var(--border); border-radius: 6px; padding: 14px; margin-top: 14px; }
+  .out .row { display: flex; justify-content: space-between; gap: 12px; padding: 3px 0; font-size: 14px; }
+  .out .row .k { color: var(--muted); }
+  .out .row .v { font-variant-numeric: tabular-nums; font-weight: 600; }
+  .big { font-size: 22px; }
+  .pos { color: var(--up); } .neg { color: var(--down); }
+
+  canvas { width: 100%; background: #08080f; border: 1px solid var(--border); border-radius: 6px; display: block; }
+
+  .quiz-q { margin-bottom: 8px; font-weight: 600; }
+  .choices { display: flex; flex-direction: column; gap: 6px; }
+  .choice {
+    text-align: left; background: var(--panel2); border: 1px solid var(--border);
+    border-radius: 6px; padding: 9px 12px; cursor: pointer; color: var(--text);
+    font-size: 14px; font-family: inherit;
+  }
+  .choice:hover:not(:disabled) { border-color: var(--accent); }
+  .choice.correct { background: #14532d; border-color: var(--up); }
+  .choice.wrong { background: #4c1d1d; border-color: var(--down); }
+  .choice:disabled { cursor: default; }
+  .explain { margin-top: 10px; font-size: 13.5px; color: #c0c0e0; background: var(--panel2); padding: 10px 12px; border-radius: 6px; }
+  .progress { font-size: 13px; color: var(--muted); margin-bottom: 8px; }
+
+  footer { margin: 40px 0 20px; padding-top: 16px; border-top: 1px solid var(--border); font-size: 12px; color: var(--muted); }
+  @media (max-width: 520px) { h1 { font-size: 21px; } body { padding: 10px; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>FX 入門ラボ
+    <span class="sub">用語 → 計算 → リスク管理 → 模擬トレードまで、手を動かして学ぶ</span>
+  </h1>
+</header>
+
+<nav id="nav">
+  <button data-tab="basics" class="active">1. 基礎</button>
+  <button data-tab="pips">2. pips と損益</button>
+  <button data-tab="lev">3. レバレッジと証拠金</button>
+  <button data-tab="orders">4. 注文の種類</button>
+  <button data-tab="risk">5. リスク管理</button>
+  <button data-tab="tech">6. チャート入門</button>
+  <button data-tab="sim">7. 模擬トレード</button>
+  <button data-tab="quiz">8. 確認クイズ</button>
+</nav>
+
+<!-- ============ 1. 基礎 ============ -->
+<section id="basics" class="active">
+  <h2>FX とは何か</h2>
+  <p>FX（外国為替証拠金取引 / Foreign Exchange）は、<strong>2 つの通貨を交換する取引</strong>です。証拠金を預けて差額決済するため、実際に外貨を受け取ることなく、値動きの差額（差益・差損）だけをやり取りします。</p>
+
+  <h3>通貨ペアの読み方</h3>
+  <p><code>USD/JPY = 150.00</code> は「<strong>1 米ドルを買うのに 150.00 円必要</strong>」という意味です。</p>
+  <ul>
+    <li><strong>基軸通貨（base）</strong>＝スラッシュの左（USD）。取引する「モノ」にあたる。</li>
+    <li><strong>決済通貨（quote）</strong>＝スラッシュの右（JPY）。値段を表す「お金」にあたる。</li>
+  </ul>
+  <p>「USD/JPY を買う」＝<strong>ドルを買って円を売る</strong>。数字が上がれば利益になります。</p>
+
+  <div class="note">
+    <strong>円安・円高の向き</strong><br>
+    USD/JPY が 150 → 160 に上昇 ＝ 1 ドルを買うのに多くの円が必要 ＝ <strong>円安ドル高</strong>。<br>
+    USD/JPY が 150 → 140 に下落 ＝ <strong>円高ドル安</strong>。<br>
+    「数字が上がる＝左の通貨が強い」と覚えると迷いません。
+  </div>
+
+  <h3>買い（ロング）と売り（ショート）</h3>
+  <div class="scroll"><table>
+    <tr><th>ポジション</th><th>やっていること</th><th>利益になる方向</th></tr>
+    <tr><td>買い / ロング</td><td>基軸通貨を買い、決済通貨を売る</td><td>レートが<strong>上がる</strong></td></tr>
+    <tr><td>売り / ショート</td><td>基軸通貨を売り、決済通貨を買う</td><td>レートが<strong>下がる</strong></td></tr>
+  </table></div>
+  <p>FX は「持っていないものを先に売る」ことができるため、<strong>下落局面でも利益を狙えます</strong>。これは現物株にはない特徴です。</p>
+
+  <h3>主な通貨ペアの分類</h3>
+  <div class="scroll"><table>
+    <tr><th>分類</th><th>例</th><th>特徴</th></tr>
+    <tr><td>メジャー通貨ペア</td><td>EUR/USD, USD/JPY, GBP/USD</td><td>取引量が多く、スプレッドが狭い。初心者向き。</td></tr>
+    <tr><td>クロス円</td><td>EUR/JPY, GBP/JPY, AUD/JPY</td><td>2 つのペアの合成。値動きが大きくなりやすい。</td></tr>
+    <tr><td>マイナー / エキゾチック</td><td>TRY/JPY, ZAR/JPY, MXN/JPY</td><td>金利は高いがスプレッドが広く急変しやすい。上級者向け。</td></tr>
+  </table></div>
+
+  <h3>Bid と Ask（2 つの価格）</h3>
+  <p>チャートには常に 2 つの価格が並びます。</p>
+  <ul>
+    <li><strong>Bid（売値）</strong>… あなたが<strong>売る</strong>ときの価格（低いほう）</li>
+    <li><strong>Ask（買値）</strong>… あなたが<strong>買う</strong>ときの価格（高いほう）</li>
+    <li><strong>スプレッド</strong>… Ask − Bid。実質的な取引コスト。</li>
+  </ul>
+  <p>買った瞬間に含み損になるのは、Ask で買って Bid で評価されるためです。スプレッドが 0.2 銭なら、まず 0.2 銭ぶん動いてようやく損益ゼロになります。</p>
+
+  <h3>市場が動く時間帯</h3>
+  <div class="scroll"><table>
+    <tr><th>市場</th><th>時間（日本時間・冬）</th><th>傾向</th></tr>
+    <tr><td>東京</td><td>9:00 〜 15:00</td><td>値動きは穏やか。仲値（9:55）でドル買いが出やすい。</td></tr>
+    <tr><td>ロンドン</td><td>17:00 〜 翌 2:00</td><td>取引量が急増。トレンドが出やすい。</td></tr>
+    <tr><td>ニューヨーク</td><td>22:00 〜 翌 7:00</td><td>米経済指標で急変動。ロンドンと重なる 22〜翌 2 時が最も活発。</td></tr>
+  </table></div>
+
+  <div class="note danger">
+    <strong>最初に押さえるべき事実</strong><br>
+    FX はゼロサム（手数料を含めるとマイナスサム）のゲームです。誰かの利益は誰かの損失。
+    「勝ち方」を学ぶ前に、<strong>1 回の負けで退場しない方法</strong>（5. リスク管理）を身につけてください。
+  </div>
+</section>
+
+<!-- ============ 2. pips ============ -->
+<section id="pips">
+  <h2>pips・ロット・損益の計算</h2>
+
+  <h3>pips（ピップス）とは</h3>
+  <p>値動きを数える共通の単位です。ペアによって「1 pip」が指す小数点の位置が変わります。</p>
+  <div class="scroll"><table>
+    <tr><th>ペアの種類</th><th>1 pip</th><th>例</th></tr>
+    <tr><td>決済通貨が円（USD/JPY など）</td><td>0.01（＝1 銭）</td><td>150.00 → 150.10 は <strong>10 pips</strong></td></tr>
+    <tr><td>決済通貨が円以外（EUR/USD など）</td><td>0.0001</td><td>1.0800 → 1.0850 は <strong>50 pips</strong></td></tr>
+  </table></div>
+  <p class="muted">※ 業者によっては 1/10 pip まで表示されます（150.005 の末尾。これは「pipette / ポイント」と呼ばれます）。</p>
+
+  <h3>ロット（取引数量）</h3>
+  <div class="scroll"><table>
+    <tr><th>呼び方</th><th>通貨量</th><th>USD/JPY での 1 pip の価値</th></tr>
+    <tr><td>1 ロット（標準）</td><td>100,000 通貨</td><td>1,000 円</td></tr>
+    <tr><td>0.1 ロット（ミニ）</td><td>10,000 通貨</td><td>100 円</td></tr>
+    <tr><td>0.01 ロット（マイクロ）</td><td>1,000 通貨</td><td>10 円</td></tr>
+  </table></div>
+  <p class="muted">※ 国内業者は「1 万通貨」「1000 通貨」と表記することが多く、ロット表記は業者ごとに違います。必ず自分の口座の 1 ロット＝何通貨かを確認してください。</p>
+
+  <h3>損益の計算式</h3>
+  <p>決済通貨が円のペア（USD/JPY など）：</p>
+  <p><code>損益（円） = (決済レート − エントリーレート) × 通貨量 × 売買方向</code></p>
+  <p>決済通貨がドルのペア（EUR/USD など）は、いったんドルで損益が出るので円に換算します：</p>
+  <p><code>損益（円） = (決済 − エントリー) × 通貨量 × USD/JPY × 売買方向</code></p>
+  <p class="muted">売買方向は 買い＝+1、売り＝−1。</p>
+
+  <div class="card">
+    <h3>損益計算ツール</h3>
+    <div class="grid">
+      <div>
+        <label>通貨ペア</label>
+        <select id="p-pair"></select>
+      </div>
+      <div>
+        <label>売買</label>
+        <select id="p-side">
+          <option value="1">買い（ロング）</option>
+          <option value="-1">売り（ショート）</option>
+        </select>
+      </div>
+      <div>
+        <label>取引数量（通貨）</label>
+        <input id="p-units" type="number" value="10000" step="1000" min="0">
+      </div>
+      <div>
+        <label>エントリーレート</label>
+        <input id="p-entry" type="number" value="150.00" step="0.01">
+      </div>
+      <div>
+        <label>決済レート</label>
+        <input id="p-exit" type="number" value="150.50" step="0.01">
+      </div>
+      <div>
+        <label>USD/JPY（換算用）</label>
+        <input id="p-usdjpy" type="number" value="150.00" step="0.01">
+      </div>
+    </div>
+    <div class="out" id="p-out"></div>
+  </div>
+
+  <h3>スワップポイント（金利差調整分）</h3>
+  <p>2 国間の政策金利の差から生まれる、<strong>毎日発生する受け取り / 支払い</strong>です。</p>
+  <ul>
+    <li>高金利通貨を<strong>買って</strong>低金利通貨を売る → スワップを<strong>受け取り</strong></li>
+    <li>その逆 → スワップを<strong>支払い</strong></li>
+    <li>ポジションを日をまたいで持ち越した（ロールオーバーした）ときに発生</li>
+    <li>水曜から木曜への持ち越しは、土日ぶんを含めて<strong>3 日分</strong>付くのが一般的</li>
+  </ul>
+  <div class="note danger">
+    スワップ狙いの「高金利通貨の長期保有」は、<strong>為替差損がスワップ益を一瞬で飲み込む</strong>ことがあります。
+    年 10% のスワップも、通貨が 1 日で 10% 下落すれば消えます。
+  </div>
+</section>
+
+<!-- ============ 3. レバレッジ ============ -->
+<section id="lev">
+  <h2>レバレッジと証拠金</h2>
+
+  <p>レバレッジは「預けたお金の何倍まで取引できるか」です。日本の個人口座は<strong>最大 25 倍</strong>に規制されています。</p>
+  <p><code>必要証拠金 = 取引数量 × 基軸通貨の対円レート ÷ レバレッジ</code></p>
+  <p>例：USD/JPY が 150 円のとき 1 万通貨を取引 → 150 万円のポジション → 25 倍なら必要証拠金は <strong>6 万円</strong>。</p>
+
+  <div class="note">
+    <strong>よくある誤解</strong><br>
+    「レバレッジ 25 倍は危険、5 倍なら安全」ではありません。危険度を決めるのは<strong>ポジションの大きさ</strong>であり、
+    設定倍率そのものではありません。同じ 1 万通貨なら、25 倍設定でも 5 倍設定でも値動きによる損益額は同じです。
+    違うのは「証拠金がいくら拘束されるか」だけ。<br>
+    本当に見るべきは<strong>実効レバレッジ ＝ ポジション総額 ÷ 口座残高</strong>です。
+  </div>
+
+  <h3>証拠金維持率とロスカット</h3>
+  <p><code>証拠金維持率 = 有効証拠金（残高 ± 含み損益） ÷ 必要証拠金 × 100%</code></p>
+  <ul>
+    <li><strong>マージンコール</strong>… 維持率が一定（例 100%）を割ると警告。入金か決済を求められる。</li>
+    <li><strong>ロスカット</strong>… さらに割り込む（例 50%）と、業者が<strong>強制的に決済</strong>する。</li>
+  </ul>
+  <p>ロスカットは投資家を守る仕組みですが、<strong>最悪のタイミングで底値決済させられる</strong>ことが多いのも事実です。ロスカットに頼らず、自分の損切り注文で撤退するのが基本です。</p>
+
+  <div class="note danger">
+    急変時（要人発言、指標、週明けの窓開け）は価格が飛ぶため、ロスカットが間に合わず
+    <strong>残高がマイナス＝追証</strong>になることがあります。「最大でも証拠金まで」ではありません。
+  </div>
+
+  <div class="card">
+    <h3>証拠金・実効レバレッジ計算ツール</h3>
+    <div class="grid">
+      <div>
+        <label>通貨ペア</label>
+        <select id="m-pair"></select>
+      </div>
+      <div>
+        <label>取引数量（通貨）</label>
+        <input id="m-units" type="number" value="10000" step="1000" min="0">
+      </div>
+      <div>
+        <label>現在レート</label>
+        <input id="m-price" type="number" value="150.00" step="0.01">
+      </div>
+      <div>
+        <label>口座残高（円）</label>
+        <input id="m-balance" type="number" value="300000" step="10000" min="0">
+      </div>
+      <div>
+        <label>レバレッジ（倍）</label>
+        <input id="m-lev" type="number" value="25" step="1" min="1">
+      </div>
+      <div>
+        <label>USD/JPY（換算用）</label>
+        <input id="m-usdjpy" type="number" value="150.00" step="0.01">
+      </div>
+    </div>
+    <div class="out" id="m-out"></div>
+  </div>
+</section>
+
+<!-- ============ 4. 注文 ============ -->
+<section id="orders">
+  <h2>注文の種類</h2>
+
+  <div class="scroll"><table>
+    <tr><th>注文</th><th>内容</th><th>使いどころ</th></tr>
+    <tr><td>成行（マーケット）</td><td>今の価格で即座に約定</td><td>すぐ入りたい / すぐ逃げたいとき</td></tr>
+    <tr><td>指値（リミット）</td><td><strong>今より有利な</strong>価格を指定して待つ<br>（買いなら下、売りなら上）</td><td>押し目買い・戻り売り、利益確定</td></tr>
+    <tr><td>逆指値（ストップ）</td><td><strong>今より不利な</strong>価格を指定<br>（買いなら上、売りなら下）</td><td><strong>損切り</strong>、ブレイクアウト狙い</td></tr>
+    <tr><td>IFD</td><td>新規注文が約定したら、決済注文を自動で発注</td><td>エントリーと同時に損切りを置く</td></tr>
+    <tr><td>OCO</td><td>2 つの注文を出し、片方が約定したら他方を自動キャンセル</td><td>利確と損切りを同時に置く</td></tr>
+    <tr><td>IFO（IFD-OCO）</td><td>IFD + OCO。新規 → 利確・損切りをまとめて予約</td><td>チャートを見られないときの基本形</td></tr>
+    <tr><td>トレール</td><td>価格が有利に動くと損切り位置が自動で追従</td><td>トレンドに乗って利益を伸ばす</td></tr>
+  </table></div>
+
+  <h3>指値と逆指値を混同しないために</h3>
+  <p>どちらも「価格を指定して待つ」注文ですが、<strong>今の価格のどちら側に置くか</strong>が真逆です。</p>
+  <div class="scroll"><table>
+    <tr><th></th><th>買い注文</th><th>売り注文</th></tr>
+    <tr><th>指値</th><td>現在値より<strong>下</strong>に置く（安く買いたい）</td><td>現在値より<strong>上</strong>に置く（高く売りたい）</td></tr>
+    <tr><th>逆指値</th><td>現在値より<strong>上</strong>に置く（上抜けたら買う）</td><td>現在値より<strong>下</strong>に置く（下抜けたら売る＝損切り）</td></tr>
+  </table></div>
+
+  <h3>約定にまつわる用語</h3>
+  <ul>
+    <li><strong>スリッページ</strong>… 注文価格と実際の約定価格のズレ。急変時ほど大きい。</li>
+    <li><strong>約定拒否（リクオート）</strong>… 価格が動きすぎて注文が通らないこと。</li>
+    <li><strong>窓（ギャップ）</strong>… 週明けなどで価格が飛ぶこと。<strong>逆指値は指定価格では約定しません</strong>（次に付いた価格で約定）。</li>
+  </ul>
+
+  <div class="note good">
+    <strong>実践ルール</strong>：新規注文を出すときは、必ず<strong>同時に損切り注文（逆指値）</strong>を置く。
+    IFO を使えば 1 回の操作でエントリー・利確・損切りが完結します。「あとで置く」は、たいてい置かれません。
+  </div>
+</section>
+
+<!-- ============ 5. リスク管理 ============ -->
+<section id="risk">
+  <h2>リスク管理 ─ ここが本体</h2>
+
+  <p>手法の優劣より先に、<strong>資金管理</strong>が生死を分けます。理由は単純で、損失は非対称だからです。</p>
+  <div class="scroll"><table>
+    <tr><th>ドローダウン（資産の減少率）</th><th>元に戻すのに必要な利益率</th></tr>
+    <tr><td>−10%</td><td>+11%</td></tr>
+    <tr><td>−25%</td><td>+33%</td></tr>
+    <tr><td>−50%</td><td><strong>+100%</strong></td></tr>
+    <tr><td>−80%</td><td><strong>+400%</strong></td></tr>
+  </table></div>
+  <p>半分失うと、倍にしないと戻りません。だから「勝つこと」より「大きく負けないこと」が先です。</p>
+
+  <h3>2% ルール</h3>
+  <p>1 回のトレードで失ってよい額を<strong>口座資金の 1〜2% まで</strong>に制限します。損切り幅（pips）が決まれば、取るべき数量は自動的に決まります。</p>
+  <p><code>取引数量 = (口座資金 × リスク率) ÷ (損切り pips × 1 通貨あたりの pip 価値)</code></p>
+  <p class="muted">順序が逆です。「いくら買うか」を先に決めるのではなく、<strong>どこで損切るかを決めてから、数量を逆算</strong>します。</p>
+
+  <div class="card">
+    <h3>ポジションサイズ計算ツール</h3>
+    <div class="grid">
+      <div>
+        <label>通貨ペア</label>
+        <select id="r-pair"></select>
+      </div>
+      <div>
+        <label>口座資金（円）</label>
+        <input id="r-balance" type="number" value="300000" step="10000" min="0">
+      </div>
+      <div>
+        <label>1 トレードのリスク（%）</label>
+        <input id="r-risk" type="number" value="2" step="0.5" min="0">
+      </div>
+      <div>
+        <label>損切り幅（pips）</label>
+        <input id="r-stop" type="number" value="20" step="1" min="1">
+      </div>
+      <div>
+        <label>利確幅（pips）</label>
+        <input id="r-tp" type="number" value="40" step="1" min="0">
+      </div>
+      <div>
+        <label>USD/JPY（換算用）</label>
+        <input id="r-usdjpy" type="number" value="150.00" step="0.01">
+      </div>
+    </div>
+    <div class="out" id="r-out"></div>
+  </div>
+
+  <h3>リスクリワード比と勝率</h3>
+  <p><code>リスクリワード比（RR） = 利確幅 ÷ 損切り幅</code></p>
+  <p>RR が高ければ、勝率が低くても収支はプラスになります。損益分岐点となる勝率は次の式です。</p>
+  <p><code>必要勝率 = 1 ÷ (1 + RR)</code></p>
+  <div class="scroll"><table>
+    <tr><th>RR</th><th>収支トントンに必要な勝率</th></tr>
+    <tr><td>0.5 : 1</td><td>66.7%</td></tr>
+    <tr><td>1 : 1</td><td>50.0%</td></tr>
+    <tr><td>2 : 1</td><td>33.3%</td></tr>
+    <tr><td>3 : 1</td><td>25.0%</td></tr>
+  </table></div>
+  <p>「勝率 9 割」を謳う手法の多くは RR が極端に低く、1 回の負けで積み上げた利益を失います（コツコツドカン）。<strong>勝率と RR はセットでしか意味を持ちません</strong>。</p>
+
+  <h3>期待値</h3>
+  <p><code>期待値 = 勝率 × 平均利益 − 敗率 × 平均損失</code></p>
+  <p>これがプラスでない手法は、回数を重ねるほど確実に資金が減ります。手法を評価するときは、必ずこの 1 本の式に落として考えます。</p>
+
+  <div class="note danger">
+    <strong>破滅する典型パターン</strong>
+    <ul>
+      <li><strong>ナンピン・マーチンゲール</strong>… 負けるたびに数量を倍にする。理論上いつか勝つが、その前に資金が尽きる。</li>
+      <li><strong>損切りをずらす</strong>… 「もう少しで戻る」で、小さな損が致命傷になる。</li>
+      <li><strong>リベンジトレード</strong>… 負けを取り返そうと数量を上げる。冷静さを失った状態が最も高くつく。</li>
+      <li><strong>指標ギャンブル</strong>… 雇用統計などにポジションを持ち越す。スリッページで想定外の損失になる。</li>
+    </ul>
+  </div>
+
+  <div class="note good">
+    <strong>最初の 3 か月の推奨</strong>
+    <ul>
+      <li>デモ口座、または最小単位（1,000 通貨）だけで練習する</li>
+      <li>取引ごとに「根拠・エントリー・損切り・結果・反省」を記録する</li>
+      <li>ルールを守れたかで評価する。勝ち負けで評価しない</li>
+      <li>連敗したら数量を上げず、下げるか休む</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ============ 6. チャート ============ -->
+<section id="tech">
+  <h2>チャートの読み方（入門）</h2>
+
+  <h3>ローソク足の構造</h3>
+  <p>1 本のローソク足は、その期間の<strong>始値・高値・安値・終値</strong>を表します。</p>
+  <canvas id="candle-demo" width="640" height="300"></canvas>
+  <p class="muted">左＝陽線（終値 &gt; 始値・上昇）、右＝陰線（終値 &lt; 始値・下落）。細い線がヒゲで、その期間に到達した高値・安値を示します。</p>
+  <ul>
+    <li><strong>実体が長い</strong>… その方向の勢いが強い</li>
+    <li><strong>上ヒゲが長い</strong>… 一度上げたが売られて戻された（上値が重い）</li>
+    <li><strong>下ヒゲが長い</strong>… 一度下げたが買い戻された（下値が堅い）</li>
+  </ul>
+
+  <h3>時間足の選び方</h3>
+  <div class="scroll"><table>
+    <tr><th>時間足</th><th>スタイル</th><th>特徴</th></tr>
+    <tr><td>1分・5分</td><td>スキャルピング</td><td>ノイズが多く、スプレッド負担が相対的に重い</td></tr>
+    <tr><td>15分・1時間</td><td>デイトレード</td><td>その日のうちに完結。初心者が練習しやすい</td></tr>
+    <tr><td>4時間・日足</td><td>スイングトレード</td><td>判断回数が少なく兼業向け。スワップと窓に注意</td></tr>
+  </table></div>
+  <p><strong>マルチタイムフレーム分析</strong>… 上位足（日足・4時間足）で方向を決め、下位足（15分足）でタイミングを取るのが定石です。上位足の流れに逆らうエントリーは分が悪くなります。</p>
+
+  <h3>トレンドとレンジ</h3>
+  <ul>
+    <li><strong>上昇トレンド</strong>… 高値も安値も切り上がっている</li>
+    <li><strong>下降トレンド</strong>… 高値も安値も切り下がっている</li>
+    <li><strong>レンジ</strong>… 一定の幅を行ったり来たり。トレンド系の手法は機能しにくい</li>
+  </ul>
+  <p>相場の大半はレンジです。「トレンドが出ているときだけ入る」と決めるだけで、無駄なトレードが大きく減ります。</p>
+
+  <h3>サポートとレジスタンス</h3>
+  <p><strong>サポート（支持線）</strong>は下げ止まりやすい価格帯、<strong>レジスタンス（抵抗線）</strong>は上げ止まりやすい価格帯です。何度も反発した価格ほど意識されます。抜けると役割が入れ替わる（サポート→レジスタンス）現象は「ロールリバーサル」と呼ばれます。</p>
+  <p>キリのいい数字（150.00 など）や、直近高値・安値も強く意識されます。<strong>損切りはこうしたラインの少し外側に置く</strong>のが基本です。ラインちょうどに置くと、ヒゲで刈られます。</p>
+
+  <h3>代表的なインジケーター</h3>
+  <div class="scroll"><table>
+    <tr><th>名称</th><th>種類</th><th>見かた</th></tr>
+    <tr><td>移動平均線（MA）</td><td>トレンド系</td><td>向きでトレンド、傾きで勢い。短期線が長期線を上抜くゴールデンクロスなど</td></tr>
+    <tr><td>ボリンジャーバンド</td><td>トレンド系</td><td>バンド幅の収縮→拡大で値動きの活性化を見る</td></tr>
+    <tr><td>MACD</td><td>トレンド系</td><td>2 本の移動平均の差。転換の兆しを早めに捉える</td></tr>
+    <tr><td>RSI</td><td>オシレーター系</td><td>70 超で買われすぎ、30 割れで売られすぎ。ただしトレンド中は張り付く</td></tr>
+  </table></div>
+  <div class="note">
+    インジケーターはすべて<strong>過去の価格を加工したもの</strong>で、未来を当てる装置ではありません。
+    増やすほど判断が矛盾します。まずは移動平均 1〜2 本と水平線だけで十分です。
+  </div>
+
+  <h3>ファンダメンタルズの基本</h3>
+  <ul>
+    <li><strong>政策金利</strong>… 最大の要因。利上げ観測は通貨高、利下げ観測は通貨安につながりやすい</li>
+    <li><strong>米雇用統計</strong>… 毎月第 1 金曜（日本時間 21:30 / 夏 21:30・冬 22:30）。値動きが最大級</li>
+    <li><strong>消費者物価指数（CPI）</strong>… 金利見通しに直結するため反応が大きい</li>
+    <li><strong>中央銀行会合</strong>… FOMC（米）、日銀金融政策決定会合、ECB 理事会</li>
+  </ul>
+  <p>初心者のうちは「予想して張る」のではなく、<strong>指標の時刻を把握してポジションを持たない</strong>ことが最も実用的な使い方です。</p>
+</section>
+
+<!-- ============ 7. 模擬トレード ============ -->
+<section id="sim">
+  <h2>模擬トレード（USD/JPY）</h2>
+  <p class="muted">ランダムウォークで生成した架空の値動きです。実際の相場ではありませんが、注文 → 含み損益 → 決済の流れと、損切りの重さを体感できます。青線は 20 本の移動平均です。</p>
+
+  <canvas id="sim-chart" width="800" height="360"></canvas>
+
+  <div class="card">
+    <div class="grid">
+      <div>
+        <label>数量（通貨）</label>
+        <input id="s-units" type="number" value="10000" step="1000" min="1000">
+      </div>
+      <div>
+        <label>損切り幅（pips・0 でなし）</label>
+        <input id="s-sl" type="number" value="20" step="1" min="0">
+      </div>
+      <div>
+        <label>利確幅（pips・0 でなし）</label>
+        <input id="s-tp" type="number" value="40" step="1" min="0">
+      </div>
+      <div>
+        <label>スピード</label>
+        <select id="s-speed">
+          <option value="1200">ゆっくり</option>
+          <option value="600" selected>ふつう</option>
+          <option value="250">はやい</option>
+        </select>
+      </div>
+    </div>
+    <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:14px;">
+      <button class="btn buy" id="s-buy">買い</button>
+      <button class="btn sell" id="s-sell">売り</button>
+      <button class="btn" id="s-close">決済</button>
+      <button class="btn" id="s-pause">一時停止</button>
+      <button class="btn" id="s-reset">リセット</button>
+    </div>
+    <div class="out" id="s-out"></div>
+    <div id="s-log" class="muted" style="margin-top:10px; max-height:120px; overflow-y:auto; font-size:12.5px;"></div>
+  </div>
+  <div class="note">
+    スプレッドは 0.2 銭（2 pips 相当ではなく 0.002 円）で計算しています。買いは Ask、売りは Bid で約定するため、
+    エントリー直後は必ずマイナスから始まります。これが実際のコストです。
+  </div>
+</section>
+
+<!-- ============ 8. クイズ ============ -->
+<section id="quiz">
+  <h2>確認クイズ（全 12 問）</h2>
+  <div class="progress" id="q-progress"></div>
+  <div class="card" id="q-card"></div>
+  <div style="display:flex; gap:8px; flex-wrap:wrap;">
+    <button class="btn" id="q-next" disabled>次の問題 →</button>
+    <button class="btn" id="q-restart">最初から</button>
+  </div>
+</section>
+
+<footer>
+  本ページは学習用の教材であり、投資助言ではありません。表示される数値・チャートはすべて架空のシミュレーションです。
+  実際の取引条件（スプレッド、スワップ、ロット単位、ロスカット水準）は業者ごとに異なります。取引はご自身の判断と責任で行ってください。
+</footer>
+
+</div>
+
+<script>
+"use strict";
+
+/* ---------------- 共通：通貨ペア定義 ---------------- */
+const PAIRS = {
+  "USD/JPY": { pip: 0.01,   quote: "JPY", ref: 150.00 },
+  "EUR/JPY": { pip: 0.01,   quote: "JPY", ref: 163.00 },
+  "GBP/JPY": { pip: 0.01,   quote: "JPY", ref: 190.00 },
+  "AUD/JPY": { pip: 0.01,   quote: "JPY", ref: 98.00  },
+  "EUR/USD": { pip: 0.0001, quote: "USD", ref: 1.0800 },
+  "GBP/USD": { pip: 0.0001, quote: "USD", ref: 1.2600 },
+  "AUD/USD": { pip: 0.0001, quote: "USD", ref: 0.6500 }
+};
+
+function fillPairs(sel) {
+  Object.keys(PAIRS).forEach(function (k) {
+    const o = document.createElement("option");
+    o.value = k; o.textContent = k;
+    sel.appendChild(o);
+  });
+}
+// 1 通貨あたりの pip 価値（円）
+function pipValuePerUnit(pairName, usdjpy) {
+  const p = PAIRS[pairName];
+  return p.pip * (p.quote === "JPY" ? 1 : usdjpy);
+}
+// 基軸通貨 1 単位の円換算額
+function baseToJPY(pairName, price, usdjpy) {
+  const p = PAIRS[pairName];
+  return p.quote === "JPY" ? price : price * usdjpy;
+}
+function num(id) { const v = parseFloat(document.getElementById(id).value); return isFinite(v) ? v : 0; }
+function yen(v) { return Math.round(v).toLocaleString("ja-JP") + " 円"; }
+function sign(v) { return v > 0 ? "pos" : (v < 0 ? "neg" : ""); }
+function row(k, v, cls, big) {
+  return '<div class="row"><span class="k">' + k + '</span>' +
+         '<span class="v ' + (cls || "") + (big ? " big" : "") + '">' + v + '</span></div>';
+}
+
+/* ---------------- タブ ---------------- */
+document.getElementById("nav").addEventListener("click", function (e) {
+  const b = e.target.closest("button[data-tab]");
+  if (!b) return;
+  document.querySelectorAll("#nav button").forEach(function (x) { x.classList.remove("active"); });
+  document.querySelectorAll("section").forEach(function (x) { x.classList.remove("active"); });
+  b.classList.add("active");
+  document.getElementById(b.dataset.tab).classList.add("active");
+  window.scrollTo({ top: 0, behavior: "smooth" });
+  if (b.dataset.tab === "tech") drawCandleDemo();
+  if (b.dataset.tab === "sim") drawSim();
+});
+
+/* ---------------- 2. 損益計算 ---------------- */
+const pPair = document.getElementById("p-pair");
+fillPairs(pPair);
+pPair.addEventListener("change", function () {
+  const name = pPair.value, d = PAIRS[name].pip === 0.01 ? 2 : 4;
+  document.getElementById("p-entry").value = PAIRS[name].ref.toFixed(d);
+  document.getElementById("p-exit").value = (PAIRS[name].ref + PAIRS[name].pip * 50).toFixed(d);
+  document.getElementById("p-entry").step = PAIRS[name].pip;
+  document.getElementById("p-exit").step = PAIRS[name].pip;
+  calcProfit();
+});
+function calcProfit() {
+  const name = pPair.value, p = PAIRS[name];
+  const side = parseFloat(document.getElementById("p-side").value);
+  const units = num("p-units"), entry = num("p-entry"), exit = num("p-exit"), usdjpy = num("p-usdjpy");
+  const diff = exit - entry;
+  const pips = diff / p.pip;
+  const pv = pipValuePerUnit(name, usdjpy) * units;      // 1pip あたりの円
+  const profit = diff * units * (p.quote === "JPY" ? 1 : usdjpy) * side;
+  document.getElementById("p-out").innerHTML =
+    row("値幅", (pips >= 0 ? "+" : "") + pips.toFixed(1) + " pips", sign(pips * side)) +
+    row("1 pip の価値", yen(pv)) +
+    row("損益", (profit >= 0 ? "+" : "−") + yen(Math.abs(profit)), sign(profit), true);
+}
+["p-side", "p-units", "p-entry", "p-exit", "p-usdjpy"].forEach(function (id) {
+  document.getElementById(id).addEventListener("input", calcProfit);
+});
+calcProfit();
+
+/* ---------------- 3. 証拠金 ---------------- */
+const mPair = document.getElementById("m-pair");
+fillPairs(mPair);
+mPair.addEventListener("change", function () {
+  const name = mPair.value, d = PAIRS[name].pip === 0.01 ? 2 : 4;
+  document.getElementById("m-price").value = PAIRS[name].ref.toFixed(d);
+  calcMargin();
+});
+function calcMargin() {
+  const name = mPair.value;
+  const units = num("m-units"), price = num("m-price"), bal = num("m-balance");
+  const lev = Math.max(1, num("m-lev")), usdjpy = num("m-usdjpy");
+  const notional = units * baseToJPY(name, price, usdjpy);
+  const req = notional / lev;
+  const eff = bal > 0 ? notional / bal : Infinity;
+  const ratio = req > 0 ? (bal / req) * 100 : Infinity;
+  // 維持率 50% でロスカットになるまでの値幅
+  const lossToLC = bal - req * 0.5;
+  const pvTotal = pipValuePerUnit(name, usdjpy) * units;
+  const pipsToLC = pvTotal > 0 ? lossToLC / pvTotal : 0;
+
+  let warn = "";
+  if (eff > 10) warn = '<div class="row"><span class="k" style="color:var(--down)">⚠ 実効レバレッジが 10 倍超です。1 回の急変で口座が大きく毀損します。</span></div>';
+  else if (eff > 5) warn = '<div class="row"><span class="k" style="color:var(--warn)">実効レバレッジ 5 倍超。やや大きめのポジションです。</span></div>';
+
+  document.getElementById("m-out").innerHTML =
+    row("ポジション総額", yen(notional)) +
+    row("必要証拠金", yen(req), "", true) +
+    row("発注後の余力", yen(bal - req), sign(bal - req)) +
+    row("証拠金維持率", isFinite(ratio) ? ratio.toFixed(0) + " %" : "—", ratio < 100 ? "neg" : "pos") +
+    row("実効レバレッジ", isFinite(eff) ? eff.toFixed(2) + " 倍" : "—", eff > 10 ? "neg" : "") +
+    row("ロスカットまでの値幅（維持率50%想定）", pipsToLC > 0 ? "約 " + pipsToLC.toFixed(0) + " pips" : "既に水準割れ", pipsToLC < 50 ? "neg" : "") +
+    warn;
+}
+["m-units", "m-price", "m-balance", "m-lev", "m-usdjpy"].forEach(function (id) {
+  document.getElementById(id).addEventListener("input", calcMargin);
+});
+calcMargin();
+
+/* ---------------- 5. ポジションサイズ ---------------- */
+const rPair = document.getElementById("r-pair");
+fillPairs(rPair);
+function calcRisk() {
+  const name = rPair.value;
+  const bal = num("r-balance"), riskPct = num("r-risk");
+  const stop = Math.max(0.1, num("r-stop")), tp = num("r-tp"), usdjpy = num("r-usdjpy");
+  const riskYen = bal * riskPct / 100;
+  const pvUnit = pipValuePerUnit(name, usdjpy);
+  const units = riskYen / (stop * pvUnit);
+  const lots = Math.floor(units / 1000) * 1000 / 100000;
+  const rr = stop > 0 ? tp / stop : 0;
+  const needWin = rr > 0 ? 100 / (1 + rr) : 100;
+  const reward = tp * pvUnit * units;
+  // 1,000 通貨単位に切り捨て（取れない小ささなら 0 と表示して警告）
+  const roundedUnits = Math.floor(units / 1000) * 1000;
+
+  document.getElementById("r-out").innerHTML =
+    row("1 トレードの許容損失", yen(riskYen), "neg") +
+    row("推奨取引数量", roundedUnits.toLocaleString("ja-JP") + " 通貨", "", true) +
+    row("（ロット換算）", lots.toFixed(2) + " ロット") +
+    row("想定利益（利確時）", yen(reward), "pos") +
+    row("リスクリワード比", rr.toFixed(2) + " : 1", rr >= 1 ? "pos" : "neg") +
+    row("トントンに必要な勝率", needWin.toFixed(1) + " %", needWin <= 50 ? "pos" : "neg") +
+    (roundedUnits < 1000 ? '<div class="row"><span class="k" style="color:var(--warn)">この条件では最小単位（1,000 通貨）でもリスクが上限を超えます。損切り幅を狭めるか、資金を増やしてください。</span></div>' : "") +
+    (riskPct > 2 ? '<div class="row"><span class="k" style="color:var(--down)">⚠ リスク率が 2% を超えています。連敗時の資産減少が急激になります。</span></div>' : "");
+}
+["r-balance", "r-risk", "r-stop", "r-tp", "r-usdjpy"].forEach(function (id) {
+  document.getElementById(id).addEventListener("input", calcRisk);
+});
+rPair.addEventListener("change", calcRisk);
+calcRisk();
+
+/* ---------------- 6. ローソク足の図 ---------------- */
+function drawCandleDemo() {
+  const cv = document.getElementById("candle-demo");
+  const ctx = cv.getContext("2d");
+  const W = cv.width, H = cv.height;
+  ctx.clearRect(0, 0, W, H);
+  ctx.font = "13px 'Segoe UI', system-ui, sans-serif";
+
+  function candle(cx, bull, label) {
+    const top = 40, bottom = H - 40;
+    const bodyTop = bull ? 130 : 90, bodyBot = bull ? 230 : 190;
+    const col = bull ? "#4ade80" : "#f87171";
+    ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineWidth = 2;
+    // ヒゲ
+    ctx.beginPath(); ctx.moveTo(cx, top); ctx.lineTo(cx, bodyTop); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(cx, bodyBot); ctx.lineTo(cx, bottom); ctx.stroke();
+    // 実体
+    ctx.fillRect(cx - 22, bodyTop, 44, bodyBot - bodyTop);
+    // ラベル
+    ctx.fillStyle = "#8888aa";
+    ctx.textAlign = "left";
+    const lx = cx + 34;
+    ctx.fillText("高値", lx, top + 5);
+    ctx.fillText(bull ? "終値" : "始値", lx, bodyTop + 5);
+    ctx.fillText(bull ? "始値" : "終値", lx, bodyBot + 5);
+    ctx.fillText("安値", lx, bottom + 5);
+    ctx.strokeStyle = "#2d2d44"; ctx.lineWidth = 1;
+    [top, bodyTop, bodyBot, bottom].forEach(function (y) {
+      ctx.beginPath(); ctx.moveTo(cx + 24, y); ctx.lineTo(lx - 4, y); ctx.stroke();
+    });
+    ctx.fillStyle = col; ctx.textAlign = "center";
+    ctx.fillText(label, cx, H - 12);
+  }
+  candle(90, true, "陽線（上昇）");
+  candle(400, false, "陰線（下落）");
+}
+drawCandleDemo();
+
+/* ---------------- 7. 模擬トレード ---------------- */
+const SPREAD = 0.002;      // 0.2 銭
+const PIP = 0.01;
+const START_BAL = 300000;
+const sim = {
+  candles: [], price: 150.00, balance: START_BAL, pos: null,
+  timer: null, running: true, trades: 0, wins: 0, log: []
+};
+
+function randn() {
+  // Box-Muller
+  let u = 0, v = 0;
+  while (u === 0) u = Math.random();
+  while (v === 0) v = Math.random();
+  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+}
+function newCandle(prev) {
+  const o = prev;
+  let c = o;
+  let h = o, l = o;
+  for (let i = 0; i < 6; i++) {
+    c += randn() * 0.028;
+    h = Math.max(h, c); l = Math.min(l, c);
+  }
+  return { o: o, h: h, l: l, c: c };
+}
+function resetSim() {
+  sim.candles = []; sim.price = 150.00; sim.balance = START_BAL;
+  sim.pos = null; sim.trades = 0; sim.wins = 0; sim.log = [];
+  for (let i = 0; i < 70; i++) {
+    const cd = newCandle(sim.price);
+    sim.candles.push(cd); sim.price = cd.c;
+  }
+  renderSim();
+}
+function simLog(msg) {
+  sim.log.unshift(msg);
+  if (sim.log.length > 40) sim.log.pop();
+  document.getElementById("s-log").innerHTML = sim.log.join("<br>");
+}
+function bidAsk() { return { bid: sim.price - SPREAD / 2, ask: sim.price + SPREAD / 2 }; }
+function unrealized() {
+  if (!sim.pos) return 0;
+  const q = bidAsk();
+  const now = sim.pos.side === 1 ? q.bid : q.ask;
+  return (now - sim.pos.entry) * sim.pos.units * sim.pos.side;
+}
+function openPos(side) {
+  if (sim.pos) { simLog("既にポジションを保有しています。"); return; }
+  const units = Math.max(1000, parseFloat(document.getElementById("s-units").value) || 1000);
+  const q = bidAsk();
+  const entry = side === 1 ? q.ask : q.bid;
+  const slP = parseFloat(document.getElementById("s-sl").value) || 0;
+  const tpP = parseFloat(document.getElementById("s-tp").value) || 0;
+  sim.pos = {
+    side: side, units: units, entry: entry,
+    sl: slP > 0 ? entry - side * slP * PIP : null,
+    tp: tpP > 0 ? entry + side * tpP * PIP : null
+  };
+  simLog((side === 1 ? "▲ 買い" : "▼ 売り") + " " + units.toLocaleString("ja-JP") + " 通貨 @ " + entry.toFixed(3));
+  renderSim();
+}
+function closePos(reason, atPrice) {
+  if (!sim.pos) return;
+  const q = bidAsk();
+  const px = (typeof atPrice === "number") ? atPrice : (sim.pos.side === 1 ? q.bid : q.ask);
+  const pl = (px - sim.pos.entry) * sim.pos.units * sim.pos.side;
+  sim.balance += pl;
+  sim.trades++;
+  if (pl > 0) sim.wins++;
+  simLog("● 決済 @ " + px.toFixed(3) + "（" + reason + "） " +
+         (pl >= 0 ? "+" : "−") + Math.abs(Math.round(pl)).toLocaleString("ja-JP") + " 円");
+  sim.pos = null;
+  renderSim();
+}
+function tick() {
+  const cd = newCandle(sim.price);
+  sim.candles.push(cd);
+  if (sim.candles.length > 90) sim.candles.shift();
+  sim.price = cd.c;
+  if (sim.pos) {
+    const p = sim.pos;
+    if (p.sl !== null && ((p.side === 1 && cd.l <= p.sl) || (p.side === -1 && cd.h >= p.sl))) {
+      closePos("損切り", p.sl);
+    } else if (p.tp !== null && ((p.side === 1 && cd.h >= p.tp) || (p.side === -1 && cd.l <= p.tp))) {
+      closePos("利確", p.tp);
+    }
+  }
+  renderSim();
+}
+function sma(arr, n, idx) {
+  if (idx < n - 1) return null;
+  let s = 0;
+  for (let i = idx - n + 1; i <= idx; i++) s += arr[i].c;
+  return s / n;
+}
+function drawSim() {
+  const cv = document.getElementById("sim-chart");
+  const ctx = cv.getContext("2d");
+  const W = cv.width, H = cv.height, PAD = 46;
+  ctx.clearRect(0, 0, W, H);
+  const cs = sim.candles;
+  if (!cs.length) return;
+  let hi = -Infinity, lo = Infinity;
+  cs.forEach(function (c) { hi = Math.max(hi, c.h); lo = Math.min(lo, c.l); });
+  if (sim.pos) { hi = Math.max(hi, sim.pos.entry); lo = Math.min(lo, sim.pos.entry); }
+  const pad = (hi - lo) * 0.12 || 0.1;
+  hi += pad; lo -= pad;
+  const y = function (p) { return H - 24 - (p - lo) / (hi - lo) * (H - 48); };
+  const cw = (W - PAD - 8) / cs.length;
+
+  // グリッド
+  ctx.strokeStyle = "#1e1e33"; ctx.lineWidth = 1;
+  ctx.fillStyle = "#666688"; ctx.font = "11px system-ui"; ctx.textAlign = "right";
+  for (let i = 0; i <= 4; i++) {
+    const p = lo + (hi - lo) * i / 4, yy = y(p);
+    ctx.beginPath(); ctx.moveTo(PAD, yy); ctx.lineTo(W - 8, yy); ctx.stroke();
+    ctx.fillText(p.toFixed(2), PAD - 6, yy + 4);
+  }
+  // ローソク
+  cs.forEach(function (c, i) {
+    const cx = PAD + cw * (i + 0.5);
+    const bull = c.c >= c.o;
+    ctx.strokeStyle = ctx.fillStyle = bull ? "#4ade80" : "#f87171";
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(cx, y(c.h)); ctx.lineTo(cx, y(c.l)); ctx.stroke();
+    const bw = Math.max(2, cw * 0.62);
+    const top = y(Math.max(c.o, c.c)), bot = y(Math.min(c.o, c.c));
+    ctx.fillRect(cx - bw / 2, top, bw, Math.max(1, bot - top));
+  });
+  // 移動平均（20）
+  ctx.strokeStyle = "#60a5fa"; ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  let started = false;
+  cs.forEach(function (c, i) {
+    const m = sma(cs, 20, i);
+    if (m === null) return;
+    const cx = PAD + cw * (i + 0.5);
+    if (!started) { ctx.moveTo(cx, y(m)); started = true; } else ctx.lineTo(cx, y(m));
+  });
+  ctx.stroke();
+  // エントリー / SL / TP
+  function hline(price, color, label, dash) {
+    ctx.save();
+    ctx.setLineDash(dash || [4, 4]);
+    ctx.strokeStyle = color; ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.moveTo(PAD, y(price)); ctx.lineTo(W - 8, y(price)); ctx.stroke();
+    ctx.restore();
+    ctx.fillStyle = color; ctx.textAlign = "left"; ctx.font = "11px system-ui";
+    ctx.fillText(label, PAD + 4, y(price) - 4);
+  }
+  if (sim.pos) {
+    hline(sim.pos.entry, "#e0e0f0", (sim.pos.side === 1 ? "買い" : "売り") + " " + sim.pos.entry.toFixed(3));
+    if (sim.pos.sl !== null) hline(sim.pos.sl, "#f87171", "損切 " + sim.pos.sl.toFixed(3));
+    if (sim.pos.tp !== null) hline(sim.pos.tp, "#4ade80", "利確 " + sim.pos.tp.toFixed(3));
+  }
+  // 現在値
+  ctx.fillStyle = "#fbbf24"; ctx.textAlign = "right"; ctx.font = "bold 13px system-ui";
+  ctx.fillText(sim.price.toFixed(3), W - 10, 18);
+}
+function renderSim() {
+  drawSim();
+  const pl = unrealized();
+  const eq = sim.balance + pl;
+  const q = bidAsk();
+  let posText = "なし";
+  if (sim.pos) {
+    posText = (sim.pos.side === 1 ? "買い" : "売り") + " " +
+              sim.pos.units.toLocaleString("ja-JP") + " 通貨 @ " + sim.pos.entry.toFixed(3);
+  }
+  const winRate = sim.trades ? (sim.wins / sim.trades * 100).toFixed(0) + " %" : "—";
+  document.getElementById("s-out").innerHTML =
+    row("Bid / Ask", q.bid.toFixed(3) + " / " + q.ask.toFixed(3)) +
+    row("ポジション", posText) +
+    row("含み損益", sim.pos ? ((pl >= 0 ? "+" : "−") + yen(Math.abs(pl))) : "—", sign(pl)) +
+    row("有効証拠金", yen(eq), sign(eq - START_BAL), true) +
+    row("通算損益", (eq - START_BAL >= 0 ? "+" : "−") + yen(Math.abs(eq - START_BAL)), sign(eq - START_BAL)) +
+    row("トレード数 / 勝率", sim.trades + " 回 / " + winRate);
+  document.getElementById("s-close").disabled = !sim.pos;
+}
+function startSim() {
+  if (sim.timer) clearInterval(sim.timer);
+  const sp = parseInt(document.getElementById("s-speed").value, 10);
+  sim.timer = setInterval(function () { if (sim.running) tick(); }, sp);
+}
+document.getElementById("s-buy").addEventListener("click", function () { openPos(1); });
+document.getElementById("s-sell").addEventListener("click", function () { openPos(-1); });
+document.getElementById("s-close").addEventListener("click", function () { closePos("手動"); });
+document.getElementById("s-pause").addEventListener("click", function () {
+  sim.running = !sim.running;
+  this.textContent = sim.running ? "一時停止" : "再開";
+});
+document.getElementById("s-reset").addEventListener("click", function () {
+  resetSim(); simLog("リセットしました。");
+});
+document.getElementById("s-speed").addEventListener("change", startSim);
+resetSim();
+startSim();
+
+/* ---------------- 8. クイズ ---------------- */
+const QUIZ = [
+  {
+    q: "USD/JPY が 150.00 から 148.00 に動きました。これは何と呼ばれますか。",
+    c: ["円高ドル安", "円安ドル高", "ドル建てで円が下落", "スワップの発生"],
+    a: 0,
+    e: "1 ドルを買うのに必要な円が減った＝円の価値が上がった、ということです。数字が下がる＝左の通貨（USD）が弱い、と覚えます。"
+  },
+  {
+    q: "USD/JPY を 1 万通貨買い、150.00 → 150.30 で決済しました。損益は？",
+    c: ["+300 円", "+3,000 円", "+30,000 円", "+30 円"],
+    a: 1,
+    e: "(150.30 − 150.00) × 10,000 = 3,000 円。30 pips × 1 万通貨の pip 価値 100 円 = 3,000 円 とも計算できます。"
+  },
+  {
+    q: "EUR/USD で 1.0800 → 1.0850 の値動きは何 pips ですか。",
+    c: ["5 pips", "50 pips", "500 pips", "0.5 pips"],
+    a: 1,
+    e: "決済通貨が円以外のペアは 1 pip = 0.0001。0.0050 ÷ 0.0001 = 50 pips です。"
+  },
+  {
+    q: "買いポジションの損切り注文として正しいのはどれですか。",
+    c: ["現在値より上に指値の売り", "現在値より下に逆指値の売り", "現在値より下に指値の買い", "現在値より上に逆指値の買い"],
+    a: 1,
+    e: "損切りは「不利な方向に進んだら決済する」注文なので逆指値です。買いポジションは価格が下がると損なので、下に置きます。上に置く指値の売りは利益確定になります。"
+  },
+  {
+    q: "口座資金 30 万円、1 トレードのリスク 2%、損切り 20 pips。USD/JPY で取れる数量は？",
+    c: ["3,000 通貨", "10,000 通貨", "30,000 通貨", "100,000 通貨"],
+    a: 2,
+    e: "許容損失 = 30 万 × 2% = 6,000 円。1 通貨あたり 20 pips 動いたときの損失は 20 × 0.01 = 0.2 円。6,000 ÷ 0.2 = 30,000 通貨。「いくら買うか」ではなく「どこで損切るか」から数量を逆算するのが正しい順序です。"
+  },
+  {
+    q: "資産が 50% 減りました。元の水準に戻すのに必要な利益率は？",
+    c: ["50%", "75%", "100%", "150%"],
+    a: 2,
+    e: "100 万 → 50 万。50 万を 100 万にするには倍、つまり +100% が必要です。損失は非対称であり、これがリスク管理を最優先する理由です。"
+  },
+  {
+    q: "リスクリワード比が 2:1 のとき、収支トントンに必要な勝率は？",
+    c: ["約 25%", "約 33%", "約 50%", "約 67%"],
+    a: 1,
+    e: "必要勝率 = 1 ÷ (1 + RR) = 1 ÷ 3 ≒ 33.3%。RR が高ければ、勝率が低くてもプラスにできます。"
+  },
+  {
+    q: "「実効レバレッジ」の正しい説明はどれですか。",
+    c: ["業者が設定した最大倍率", "ポジション総額 ÷ 口座残高", "必要証拠金 ÷ 口座残高", "スプレッド ÷ pip 価値"],
+    a: 1,
+    e: "設定倍率ではなく、実際に自分が背負っているレバレッジです。同じ数量なら設定倍率を変えても損益は変わらず、変わるのは拘束される証拠金額だけです。"
+  },
+  {
+    q: "スプレッドについて正しいのはどれですか。",
+    c: ["Bid が Ask より高い", "エントリー直後は含み益から始まる", "Ask − Bid であり、実質的な取引コスト", "決済時のみ発生する"],
+    a: 2,
+    e: "買いは高いほうの Ask、売りは安いほうの Bid で約定します。差額のぶん、エントリー直後は必ず含み損から始まります。"
+  },
+  {
+    q: "スワップポイントを受け取れるのはどのケースですか。",
+    c: ["高金利通貨を売り、低金利通貨を買う", "高金利通貨を買い、低金利通貨を売る", "デイトレードで当日決済する", "スプレッドが狭い業者を選ぶ"],
+    a: 1,
+    e: "金利差の受け取りは、高金利通貨を買う側で発生します。ただし為替差損がスワップ益を上回ることは珍しくありません。また日をまたがない取引では発生しません。"
+  },
+  {
+    q: "負けるたびに数量を倍にして取り返す手法の最大の問題は？",
+    c: ["スプレッドが広がる", "スワップが増える", "連敗時に必要資金が指数的に増え、資金が尽きる", "約定が遅くなる"],
+    a: 2,
+    e: "マーチンゲールは 10 連敗で 1,024 倍の数量が必要になります。理論上いつか勝てても、その前に証拠金かロスカットの壁に当たります。"
+  },
+  {
+    q: "損切り注文を置く位置として適切なのはどれですか。",
+    c: ["直近安値のちょうど同じ価格", "直近安値の少し下（外側）", "エントリー価格と同じ", "決めずに値動きを見て判断する"],
+    a: 1,
+    e: "多くの人が意識する価格ちょうどに置くと、ヒゲで一時的に刈られてから戻る、という事態になりがちです。根拠となるラインの少し外側に置きます。"
+  }
+];
+let qi = 0, qScore = 0, qAnswered = false;
+
+function renderQuiz() {
+  const q = QUIZ[qi];
+  document.getElementById("q-progress").textContent =
+    "第 " + (qi + 1) + " 問 / " + QUIZ.length + "　正解 " + qScore + " 問";
+  let html = '<div class="quiz-q">Q' + (qi + 1) + ". " + q.q + '</div><div class="choices">';
+  q.c.forEach(function (c, i) {
+    html += '<button class="choice" data-i="' + i + '">' + (i + 1) + ". " + c + "</button>";
+  });
+  html += "</div>";
+  document.getElementById("q-card").innerHTML = html;
+  qAnswered = false;
+  document.getElementById("q-next").disabled = true;
+  document.getElementById("q-next").textContent = qi === QUIZ.length - 1 ? "結果を見る →" : "次の問題 →";
+}
+document.getElementById("q-card").addEventListener("click", function (e) {
+  const b = e.target.closest(".choice");
+  if (!b || qAnswered) return;
+  qAnswered = true;
+  const q = QUIZ[qi], picked = parseInt(b.dataset.i, 10);
+  const btns = this.querySelectorAll(".choice");
+  btns.forEach(function (x, i) {
+    x.disabled = true;
+    if (i === q.a) x.classList.add("correct");
+    else if (i === picked) x.classList.add("wrong");
+  });
+  if (picked === q.a) qScore++;
+  const ex = document.createElement("div");
+  ex.className = "explain";
+  ex.innerHTML = (picked === q.a ? "✅ 正解！ " : "❌ 不正解。 ") + q.e;
+  this.appendChild(ex);
+  document.getElementById("q-next").disabled = false;
+  document.getElementById("q-progress").textContent =
+    "第 " + (qi + 1) + " 問 / " + QUIZ.length + "　正解 " + qScore + " 問";
+});
+document.getElementById("q-next").addEventListener("click", function () {
+  if (qi < QUIZ.length - 1) { qi++; renderQuiz(); return; }
+  const rate = Math.round(qScore / QUIZ.length * 100);
+  let msg;
+  if (rate === 100) msg = "満点です。基礎は固まりました。次は少額の実践と記録に進みましょう。";
+  else if (rate >= 75) msg = "よく理解できています。間違えた分野をもう一度読み返してください。";
+  else if (rate >= 50) msg = "あと一歩。特に「リスク管理」と「pips と損益」を復習しましょう。";
+  else msg = "まずは 1〜3 章と 5 章をじっくり読み直しましょう。急がなくて大丈夫です。";
+  document.getElementById("q-card").innerHTML =
+    '<h3 style="margin-top:0">結果</h3>' +
+    '<div class="out">' +
+      row("正解数", qScore + " / " + QUIZ.length, "", true) +
+      row("正答率", rate + " %", rate >= 75 ? "pos" : (rate >= 50 ? "" : "neg")) +
+    "</div><p>" + msg + "</p>";
+  document.getElementById("q-progress").textContent = "終了";
+  this.disabled = true;
+});
+document.getElementById("q-restart").addEventListener("click", function () {
+  qi = 0; qScore = 0; renderQuiz();
+});
+renderQuiz();
+</script>
+</body>
+</html>
