@@ -118,6 +118,7 @@ function statusMessage(status) {
   switch (status) {
     case "未対応": return "受付済みです。順番に対応しますので、少しお待ちください。";
     case "代行中": return "代行作業中です。もう少しお待ちください。";
+    case "再入力待ち": return "ご入力いただいたアカウントでログインできなかったため、入力し直しをお願いしています。";
     case "納品済": return "納品が完了しています。ご確認のうえ、「OK」や「ありがとう」と送ってください。";
     case "完了": return "完了しています。ご利用ありがとうございました。";
     default: return "確認中です。";
@@ -340,10 +341,16 @@ function handleTextMessage(userId, replyToken, rawText) {
   var text = normalizeText(rawText);
   var name = getDisplayName(userId);
   var rec = getLineRecord(userId);
+  var sheet = ordersSheet();
+  var orders = ordersOfUser(sheet, userId);
 
   // 1. IDやパスワードらしきもの：AIに送らない・記録しない
   if (looksLikeCredentials(text)) {
-    lineReply(replyToken, BOT.CRED_REPLY);
+    var refill = orders.filter(function (o) { return o.status === "再入力待ち"; });
+    lineReply(replyToken, refill.length
+      ? BOT.CRED_REPLY.split("\n")[0] + "\n入力し直しは、こちらのリンクからお願いします。\n" + fixUrl(sheet, refill[refill.length - 1].row) +
+        "\n（すでに送ってしまったメッセージは、送信取消をお願いします）"
+      : BOT.CRED_REPLY);
     upsertLineRecord(userId, name, {});
     return;
   }
@@ -351,8 +358,6 @@ function handleTextMessage(userId, replyToken, rawText) {
   var link = extractLink(text);
   if (link.receiptNo) { handleLink(userId, replyToken, name, link); return; }
   // 3. 進捗
-  var sheet = ordersSheet();
-  var orders = ordersOfUser(sheet, userId);
   if (isProgressRequest(text)) { handleProgress(userId, replyToken, name, orders); return; }
   // 4. 決まった返事
   var fixed = matchFixedReply(text);
@@ -447,7 +452,11 @@ function handleLink(userId, replyToken, name, link) {
 
 function handleProgress(userId, replyToken, name, orders) {
   if (!orders.length) { lineReply(replyToken, BOT.NO_LINK_REPLY); return; }
-  var lines = orders.slice(-3).reverse().map(function (o) { return "受付番号 " + o.receiptNo + "：" + statusMessage(o.status); });
+  var sheet = ordersSheet();
+  var lines = orders.slice(-3).reverse().map(function (o) {
+    return "受付番号 " + o.receiptNo + "：" + statusMessage(o.status) +
+      (o.status === "再入力待ち" ? "\n入力し直しはこちら：\n" + fixUrl(sheet, o.row) : "");
+  });
   lineReply(replyToken, lines.join("\n\n"));
   upsertLineRecord(userId, name, {});
 }

@@ -24,7 +24,7 @@ var CONFIG = {
   },
   SHEET_NAME: "受付",
   HEADER: ["受付日時", "受付番号", "依頼者", "希望メニュー", "数量", "金額", "連絡先", "備考", "支払い写真", "ステータス"],
-  STATUSES: ["未対応", "代行中", "納品済", "完了"],
+  STATUSES: ["未対応", "代行中", "再入力待ち", "納品済", "完了"],
   DEFAULT_STATUS: "未対応",
   RECEIPT_PREFIX: "T",
   TIMEZONE: "Asia/Tokyo",
@@ -40,13 +40,15 @@ var MSG_ID_COL = CONFIG.HEADER.length + 1; // Discordのメッセージ番号（
 var TOKEN_COL = CONFIG.HEADER.length + 2;  // 確認コードの元（LINE連携用）
 var REMIND_COL = CONFIG.HEADER.length + 3; // リマインド済みの印
 var LINE_COL = CONFIG.HEADER.length + 4;   // お客さんのLINE（連携後に入る）
+var FIX_COL = CONFIG.HEADER.length + 5;    // お客さんがアカウントを入力し直した回数
 
 // ===== 小さな道具 =====
 function prop(name) {
   return PropertiesService.getScriptProperties().getProperty(name) || "";
 }
 function col(name) { return CONFIG.HEADER.indexOf(name) + 1; }
-function appUrl() { return ScriptApp.getService().getUrl(); }
+/** このアプリのURL（スクリプト プロパティに APP_URL があれば、それを使う）*/
+function appUrl() { return prop("APP_URL") || ScriptApp.getService().getUrl(); }
 function makeToken() { return Utilities.getUuid().replace(/-/g, ""); }
 function ordersSheet() { return SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONFIG.SHEET_NAME); }
 
@@ -92,6 +94,15 @@ function doGet(e) {
   if (page === "admin" || page === "worker") {
     return HtmlService.createHtmlOutputFromFile(page)
       .setTitle(page === "admin" ? "管理ページ" : "代行者ページ")
+      .addMetaTag("viewport", "width=device-width, initial-scale=1")
+      .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+  }
+  if (page === "fix") { // お客さん：アカウントの入力し直し
+    var f = HtmlService.createTemplateFromFile("fix");
+    f.no = String(e.parameter.no || "");
+    f.tk = String(e.parameter.t || "");
+    return f.evaluate()
+      .setTitle("アカウントの再入力")
       .addMetaTag("viewport", "width=device-width, initial-scale=1")
       .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
   }
@@ -260,6 +271,12 @@ function applyStatusEffects(sheet, row, status, opts) {
       notifyAdmin("⚠️ " + receiptNo + " は納品済にしましたが、LINEでお知らせできませんでした（LINE未連携）。手動でご連絡ください。");
     }
   }
+  if (status === "再入力待ち") {
+    var url = fixUrl(sheet, row);
+    if (!(userId && linePush(userId, refillMessage(receiptNo, url)))) {
+      notifyAdmin("⚠️ " + receiptNo + " は「再入力待ち」にしましたが、LINEでお知らせできませんでした（LINE未連携）。\n次のリンクを、お客さんに手動で送ってください。\n" + url);
+    }
+  }
   if (status === "完了") {
     deleteDiscordMessage(sheet, row);
     if (userId) {
@@ -278,6 +295,59 @@ function onStatusEdit(e) {
   var status = normStatus(e.range.getValue());
   if (e.oldValue !== undefined && normStatus(e.oldValue) === status) return;
   applyStatusEffects(sheet, e.range.getRow(), status, {});
+}
+
+// ===== アカウントの入力し直し（メアド・パスワードが違ったとき）=====
+/** お客さん専用の、入力し直し用リンク */
+function fixUrl(sheet, row) {
+  return appUrl() + "?page=fix&no=" + encodeURIComponent(String(sheet.getRange(row, col("受付番号")).getValue())) +
+    "&t=" + encodeURIComponent(String(sheet.getRange(row, TOKEN_COL).getValue()));
+}
+function refillMessage(receiptNo, url) {
+  return "【受付番号 " + receiptNo + "】\nご入力いただいたアカウントで、ログインできませんでした🙏\n" +
+    "お手数ですが、下のリンクから、メールアドレスとパスワードをもう一度入力してください。\n" + url +
+    "\n\n※IDやパスワードは、このトークには送らないでください。\n※入力が終わると、自動で代行を再開します。";
+}
+/** リンクの受付番号と合言葉が正しく、いま「再入力待ち」の行を探す（なければ 0）*/
+function findFixRow(sheet, receiptNo, tk) {
+  var row = findOrderRow(sheet, String(receiptNo || "").trim());
+  if (!row) return 0;
+  var token = String(sheet.getRange(row, TOKEN_COL).getValue());
+  if (!token || String(tk || "") !== token) return 0;
+  return row;
+}
+/** 前に入力されたメールアドレスを、一部だけ見せる（パスワードは見せない）*/
+function maskAccount(v) {
+  var m = /([\w.+-]+)@([\w-]+(?:\.[\w-]+)+)/.exec(String(v || ""));
+  if (!m) return "";
+  return m[1].slice(0, 2) + "***@" + m[2];
+}
+function fixInfo(receiptNo, tk) {
+  var sheet = ordersSheet();
+  var row = findFixRow(sheet, receiptNo, tk);
+  if (!row) return { ok: false, message: "リンクが正しくありません。LINEに届いたリンクを、もう一度開いてください。" };
+  if (normStatus(sheet.getRange(row, col("ステータス")).getValue()) !== "再入力待ち") {
+    return { ok: false, message: "この受付は、いまは入力し直しの必要がありません。ご不明な点は公式LINEにご連絡ください。" };
+  }
+  return { ok: true, receiptNo: String(receiptNo), menu: String(sheet.getRange(row, col("希望メニュー")).getValue()),
+    hint: maskAccount(sheet.getRange(row, col("連絡先")).getValue()) };
+}
+function fixSubmit(receiptNo, tk, account) {
+  account = String(account || "").trim();
+  if (!account) return { ok: false, message: "メールアドレスとパスワードを入力してください。" };
+  if (account.length > 300) return { ok: false, message: "入力が長すぎます。" };
+  var sheet = ordersSheet();
+  var done = lockRun(function () {
+    var row = findFixRow(sheet, receiptNo, tk);
+    if (!row || normStatus(sheet.getRange(row, col("ステータス")).getValue()) !== "再入力待ち") return 0;
+    sheet.getRange(row, col("連絡先")).setValue(account);
+    sheet.getRange(row, FIX_COL).setValue((Number(sheet.getRange(row, FIX_COL).getValue()) || 0) + 1);
+    sheet.getRange(row, col("ステータス")).setValue("代行中");
+    return row;
+  });
+  if (!done) return { ok: false, message: "この受付は、いまは入力し直しの必要がありません。" };
+  notifyAdmin("🔁 " + receiptNo + " のアカウントが入力し直されました。代行者ページに戻っています。");
+  return { ok: true };
 }
 
 // ===== LINEと注文を結びつける道具（Bot.gs から使います）=====
@@ -327,7 +397,8 @@ function adminDetail(key, receiptNo) {
   var rec = {};
   for (var j = 0; j < CONFIG.HEADER.length; j++) rec[CONFIG.HEADER[j]] = (j === 0) ? fmtCell(v[j]) : String(v[j]);
   rec["ステータス"] = normStatus(rec["ステータス"]);
-  return { ok: true, record: rec, line: !!String(v[LINE_COL - 1]) };
+  return { ok: true, record: rec, line: !!String(v[LINE_COL - 1]),
+    fixUrl: rec["ステータス"] === "再入力待ち" ? fixUrl(sheet, row) : "" };
 }
 
 function adminSetStatus(key, receiptNo, status) {
@@ -359,7 +430,7 @@ function adminStats(key) {
   var sheet = ordersSheet(), now = new Date();
   var today = Utilities.formatDate(now, CONFIG.TIMEZONE, "yyyy/MM/dd");
   var month = Utilities.formatDate(now, CONFIG.TIMEZONE, "yyyy/MM");
-  var s = { todayCnt: 0, todaySum: 0, monthCnt: 0, monthSum: 0, counts: { "未対応": 0, "代行中": 0, "納品済": 0, "完了": 0 } };
+  var s = { todayCnt: 0, todaySum: 0, monthCnt: 0, monthSum: 0, counts: { "未対応": 0, "代行中": 0, "再入力待ち": 0, "納品済": 0, "完了": 0 } };
   var last = sheet.getLastRow();
   if (last >= 2) {
     var v = sheet.getRange(2, 1, last - 1, CONFIG.HEADER.length).getValues();
@@ -381,11 +452,12 @@ function workerList(key) {
   if (!isWorker(key)) return { ok: false };
   var sheet = ordersSheet(), out = [], last = sheet.getLastRow();
   if (last >= 2) {
-    var v = sheet.getRange(2, 1, last - 1, CONFIG.HEADER.length).getValues();
+    var v = sheet.getRange(2, 1, last - 1, FIX_COL).getValues();
     for (var i = 0; i < v.length; i++) {
       if (normStatus(v[i][col("ステータス") - 1]) !== "代行中") continue;
       out.push({ no: String(v[i][col("受付番号") - 1]), menu: String(v[i][col("希望メニュー") - 1]),
-        account: String(v[i][col("連絡先") - 1]), note: String(v[i][col("備考") - 1]) });
+        account: String(v[i][col("連絡先") - 1]), note: String(v[i][col("備考") - 1]),
+        fixed: (Number(v[i][FIX_COL - 1]) || 0) > 0 });
     }
   }
   return { ok: true, list: out };
@@ -398,6 +470,17 @@ function workerDeliver(key, receiptNo) {
   if (!row) return { ok: false };
   if (normStatus(sheet.getRange(row, col("ステータス")).getValue()) !== "代行中") return { ok: false };
   setOrderStatus(sheet, row, "納品済", {});
+  return { ok: true };
+}
+
+/** 代行者：ログインできなかった → お客さんに入力し直しを頼む */
+function workerLoginFail(key, receiptNo) {
+  if (!isWorker(key)) return { ok: false };
+  var sheet = ordersSheet();
+  var row = findOrderRow(sheet, String(receiptNo || "").trim());
+  if (!row) return { ok: false };
+  if (normStatus(sheet.getRange(row, col("ステータス")).getValue()) !== "代行中") return { ok: false };
+  setOrderStatus(sheet, row, "再入力待ち", {});
   return { ok: true };
 }
 
@@ -433,11 +516,11 @@ function dailySummary() {
     var v = sheet.getRange(2, 1, last - 1, CONFIG.HEADER.length).getValues();
     for (var i = 0; i < v.length; i++) {
       var st = normStatus(v[i][col("ステータス") - 1]);
-      if (st === "未対応" || st === "代行中") pending++;
+      if (st === "未対応" || st === "代行中" || st === "再入力待ち") pending++;
       if (fmtCell(v[i][col("受付日時") - 1]).indexOf(ymd) === 0) { cnt++; sum += Number(v[i][col("金額") - 1]) || 0; }
     }
   }
-  notifyAdmin("📊 昨日のまとめ(" + ymd + ")\n件数: " + cnt + "件\n売上: ¥" + sum.toLocaleString("ja-JP") + "\n対応待ち(未対応＋代行中): " + pending + "件");
+  notifyAdmin("📊 昨日のまとめ(" + ymd + ")\n件数: " + cnt + "件\n売上: ¥" + sum.toLocaleString("ja-JP") + "\n対応待ち(未対応・代行中・再入力待ち): " + pending + "件");
 }
 
 // ===== 初期設定（最初に1回実行）=====
@@ -451,7 +534,8 @@ function setup() {
   sheet.getRange(1, TOKEN_COL).setValue("_code");
   sheet.getRange(1, REMIND_COL).setValue("_reminded");
   sheet.getRange(1, LINE_COL).setValue("_lineUser");
-  sheet.hideColumns(MSG_ID_COL, 4);
+  sheet.getRange(1, FIX_COL).setValue("_fix");
+  sheet.hideColumns(MSG_ID_COL, 5);
   var rule = SpreadsheetApp.newDataValidation().requireValueInList(CONFIG.STATUSES, true).build();
   sheet.getRange(2, col("ステータス"), Math.max(sheet.getMaxRows() - 1, 1), 1).setDataValidation(rule);
 
@@ -470,7 +554,7 @@ function setup() {
 /** 秘密の設定がそろっているか確認します（中身は表示しません）*/
 function checkSecrets() {
   var need = ["LINE_TOKEN", "CLAUDE_API_KEY", "WEBHOOK_KEY", "ADMIN_KEY", "WORKER_KEY", "DISCORD_NORMAL", "DISCORD_PRIORITY", "LINE_BASIC_ID"];
-  var optional = ["TEST_MODE", "TEST_USER_ID"];
+  var optional = ["APP_URL", "TEST_MODE", "TEST_USER_ID"];
   var missing = 0;
   need.forEach(function (n) { var ok = !!prop(n); if (!ok) missing++; Logger.log((ok ? "OK    " : "未設定 ") + n); });
   optional.forEach(function (n) { Logger.log((prop(n) ? "設定あり " : "（なし）  ") + n + "  ※必要なときだけ"); });

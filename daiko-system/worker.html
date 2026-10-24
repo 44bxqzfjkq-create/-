@@ -17,6 +17,8 @@
   .no{font-weight:800;font-size:17px;}
   .f{margin:8px 0;word-break:break-all;} .f b{display:block;font-size:12px;color:var(--sub);}
   .hint{font-size:13px;color:var(--sub);}
+  .fixed{display:inline-block;font-size:12px;background:#fff0c2;border-radius:6px;padding:2px 8px;margin-left:6px;}
+  button.ng{background:#8a94a0;margin-left:8px;}
 </style>
 </head>
 <body>
@@ -29,7 +31,8 @@
   </div>
 
   <div id="main" style="display:none">
-    <div class="hint">代行する依頼の一覧です。代行と納品が終わったら「納品完了」を押してください（お客さんにLINEでお知らせが届きます）。</div>
+    <div class="hint">代行する依頼の一覧です。代行と納品が終わったら「納品完了」を押してください（お客さんにLINEでお知らせが届きます）。<br>
+      メールアドレスやパスワードが違ってログインできないときは「ログインできない」を押してください。お客さんに入力し直しのお願いが自動で届き、入力されるとこの一覧に戻ってきます。</div>
     <div id="list"></div>
   </div>
 </div>
@@ -52,14 +55,17 @@
 
   function render(list){
     $("list").innerHTML = list.map(function(o){
-      return '<div class="card"><div class="no">' + esc(o.no) + '</div>' +
+      return '<div class="card"><div class="no">' + esc(o.no) + (o.fixed ? '<span class="fixed">🔁 お客さんが入力し直しました</span>' : '') + '</div>' +
         '<div class="f"><b>内容</b>' + esc(o.menu) + '</div>' +
         '<div class="f"><b>代行するアカウント</b>' + esc(o.account) + '</div>' +
         '<div class="f"><b>備考</b>' + esc(o.note || "なし") + '</div>' +
-        '<button data-no="' + esc(o.no) + '">納品完了</button></div>';
+        '<button data-no="' + esc(o.no) + '">納品完了</button><button class="ng" data-ng="' + esc(o.no) + '">ログインできない</button></div>';
     }).join("") || '<div class="card hint">いま代行する依頼はありません。</div>';
     Array.prototype.forEach.call($("list").querySelectorAll("button[data-no]"), function(b){
       b.addEventListener("click", function(){ deliver(b); });
+    });
+    Array.prototype.forEach.call($("list").querySelectorAll("button[data-ng]"), function(b){
+      b.addEventListener("click", function(){ loginFail(b); });
     });
   }
 
@@ -70,6 +76,16 @@
     google.script.run.withSuccessHandler(function(r){
       if (r && r.ok) { reload(); } else { alert("変更できませんでした（すでに変更済みかもしれません）"); reload(); }
     }).withFailureHandler(function(e){ btn.disabled = false; alert("エラー: " + (e && e.message ? e.message : e)); }).workerDeliver(KEY, no);
+  }
+
+  function loginFail(btn){
+    var no = btn.getAttribute("data-ng");
+    if (!confirm(no + " のお客さんに、メールアドレスとパスワードの入力し直しをお願いします。よろしいですか？")) return;
+    btn.disabled = true;
+    google.script.run.withSuccessHandler(function(r){
+      if (r && r.ok) { alert("お客さんにお願いを送りました。入力し直されると、一覧に戻ってきます。"); reload(); }
+      else { alert("変更できませんでした（すでに変更済みかもしれません）"); reload(); }
+    }).withFailureHandler(function(e){ btn.disabled = false; alert("エラー: " + (e && e.message ? e.message : e)); }).workerLoginFail(KEY, no);
   }
 
   function reload(){

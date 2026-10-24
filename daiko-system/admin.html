@@ -27,7 +27,7 @@
   .item:hover,.item.sel{background:#eef6ee;}
   .no{font-weight:700;}
   .badge{font-size:11px;padding:2px 8px;border-radius:6px;background:#eee;margin-left:4px;}
-  .badge.s0{background:#ffe3e0;} .badge.s1{background:#fff0c2;} .badge.s2{background:#dbeafe;} .badge.s3{background:#dcf5dc;}
+  .badge.s0{background:#ffe3e0;} .badge.s1{background:#fff0c2;} .badge.s2{background:#fde2c8;} .badge.s3{background:#dbeafe;} .badge.s4{background:#dcf5dc;}
   .nolink{font-size:11px;color:#b45309;margin-left:4px;}
   .card{background:#f8f9fb;border:1px solid var(--line);border-radius:8px;padding:10px;margin:8px 0;font-size:14px;}
   .card div{margin:3px 0;word-break:break-all;} .card b{color:#555;}
@@ -73,8 +73,8 @@
 
 <script>
   var KEY = "", CUR = "", LIST = [], FILTER = "要対応";
-  var STATUSES = ["未対応", "代行中", "納品済", "完了"];
-  var TABS = ["要対応", "未対応", "代行中", "納品済", "完了", "すべて"];
+  var STATUSES = ["未対応", "代行中", "再入力待ち", "納品済", "完了"];
+  var TABS = ["要対応", "未対応", "代行中", "再入力待ち", "納品済", "完了", "すべて"];
 
   function $(id){ return document.getElementById(id); }
   function esc(s){ return String(s == null ? "" : s).replace(/[&<>"']/g, function(c){ return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]; }); }
@@ -99,7 +99,7 @@
       if (!s || !s.ok) return;
       function t(l, v){ return '<div class="tile"><div class="l">' + l + '</div><div class="v">' + v + '</div></div>'; }
       $("tiles").innerHTML = t("未対応", s.counts["未対応"] + "件") + t("代行中", s.counts["代行中"] + "件") +
-        t("納品済", s.counts["納品済"] + "件") + t("今日の売上", yen(s.todaySum)) + t("今月の売上", yen(s.monthSum));
+        t("再入力待ち", s.counts["再入力待ち"] + "件") + t("納品済", s.counts["納品済"] + "件") + t("今日の売上", yen(s.todaySum)) + t("今月の売上", yen(s.monthSum));
     }).adminStats(KEY);
     loadInquiries();
   }
@@ -145,7 +145,7 @@
 
   function visible(o){
     if (FILTER === "すべて") return true;
-    if (FILTER === "要対応") return o.status === "未対応" || o.status === "代行中" || o.status === "納品済";
+    if (FILTER === "要対応") return o.status !== "完了";
     return o.status === FILTER;
   }
 
@@ -173,10 +173,11 @@
       var photo = d["支払い写真"] ? '<div><b>支払い写真</b>：<a href="' + esc(d["支払い写真"]) + '" target="_blank" rel="noopener">写真を開く</a></div>' : row("支払い写真", "なし");
       $("info").innerHTML = row("依頼者(LINE名)", d["依頼者"]) + row("受付日時", d["受付日時"]) + row("希望メニュー", d["希望メニュー"]) +
         row("金額", yen(d["金額"])) + row("代行アカウント", d["連絡先"]) + row("備考", d["備考"] || "なし") + photo +
-        row("LINE連携", r.line ? "済み" : "まだ（お客さんがLINEに受付番号を送るまで通知できません）");
+        row("LINE連携", r.line ? "済み" : "まだ（お客さんがLINEに受付番号を送るまで通知できません）") +
+        (r.fixUrl ? '<div><b>入力し直し用リンク</b>（お客さんに送る用）：<br><input type="text" readonly value="' + esc(r.fixUrl) + '" style="width:100%;font-size:12px;padding:6px" onclick="this.select()"></div>' : '');
       $("sbtns").innerHTML = STATUSES.map(function(s){
         var cls = s === d["ステータス"] ? "gray" : (s === "代行中" ? "amber" : "");
-        return '<button class="' + cls + '" data-s="' + s + '"' + (s === d["ステータス"] ? " disabled" : "") + '>' + s + (s === "代行中" ? "にする" : (s === "未対応" ? "に戻す" : "にする")) + '</button>';
+        return '<button class="' + cls + '" data-s="' + s + '"' + (s === d["ステータス"] ? " disabled" : "") + '>' + s + (s === "未対応" ? "に戻す" : "にする") + '</button>';
       }).join("");
       Array.prototype.forEach.call($("sbtns").querySelectorAll("button[data-s]"), function(b){
         b.addEventListener("click", function(){ setStatus(b.getAttribute("data-s")); });
@@ -188,6 +189,7 @@
     if (!CUR) return;
     if (s === "完了" && !confirm("「完了」にします。お客さんのLINEに完了のお知らせが届き、Discordの通知は消えます。よろしいですか？")) return;
     if (s === "納品済" && !confirm("「納品済」にします。お客さんのLINEに納品のお知らせが届きます。よろしいですか？")) return;
+    if (s === "再入力待ち" && !confirm("「再入力待ち」にします。お客さんのLINEに、メールアドレスとパスワードの入力し直しのお願いが届きます。よろしいですか？")) return;
     google.script.run.withSuccessHandler(function(r){
       if (r && r.ok) { refresh(); } else { alert("変更できませんでした"); }
     }).withFailureHandler(function(e){ alert("エラー: " + (e && e.message ? e.message : e)); }).adminSetStatus(KEY, CUR, s);

@@ -270,8 +270,65 @@ const discordCalls = (env) => env.fetchLog.filter(c => c.url.indexOf("discord.te
     assert.strictEqual(env.run("adminSetStatus")("adminpw", order.receiptNo, "代行中").ok, true);
     const w = env.run("workerList")("workerpw");
     assert.strictEqual(w.list.length, 1);
-    assert.deepStrictEqual(Object.keys(w.list[0]).sort(), ["account", "menu", "no", "note"]);
+    assert.deepStrictEqual(Object.keys(w.list[0]).sort(), ["account", "fixed", "menu", "no", "note"]);
     assert.ok(JSON.stringify(w).indexOf("花子") < 0 && JSON.stringify(w).indexOf("drive.example") < 0);
+  });
+  const TK = "abcdef1234567890abcdef1234567890";
+  const status = () => env.run("normStatus")(sheet().getRange(2, 10).getValue());
+  test("代行者：「ログインできない」→ お客さんのLINEに、入力し直し用のリンクが届く", () => {
+    assert.strictEqual(env.run("workerLoginFail")("adminpw", order.receiptNo).ok, false); // 代行者のパスワードが必要
+    const n = lineCalls(env, "push").length;
+    assert.strictEqual(env.run("workerLoginFail")("workerpw", order.receiptNo).ok, true);
+    assert.strictEqual(status(), "再入力待ち");
+    const p = lineCalls(env, "push")[n];
+    assert.strictEqual(p.body.to, "U1");
+    const txt = p.body.messages[0].text;
+    assert.ok(txt.indexOf("ログインできませんでした") >= 0 && txt.indexOf(order.receiptNo) >= 0, txt);
+    assert.ok(txt.indexOf("?page=fix&no=" + encodeURIComponent(order.receiptNo) + "&t=" + TK) >= 0, txt);
+    assert.strictEqual(env.run("workerList")("workerpw").list.length, 0, "再入力待ちの間は、代行者の一覧から消える");
+    assert.strictEqual(env.run("workerLoginFail")("workerpw", order.receiptNo).ok, false, "二重には押せない");
+  });
+  test("再入力待ちの間：「進捗」やLINEに書いたパスワードには、入力し直し用リンクで答える（記録には残さない）", () => {
+    handle("U1", "進捗");
+    assert.ok(lastReply().indexOf("ログインできなかった") >= 0 && lastReply().indexOf("page=fix") >= 0, lastReply());
+    handle("U1", "a@b.com newPass123");
+    assert.ok(lastReply().indexOf("page=fix") >= 0 && lastReply().indexOf("送らないでください") >= 0, lastReply());
+    assert.ok((JSON.stringify(env.sheets["LINE記録"]) + JSON.stringify(env.cacheStore)).indexOf("newPass123") < 0);
+  });
+  test("入力し直しページ：合言葉が違うと使えない／前のパスワードは見せない", () => {
+    assert.strictEqual(env.run("fixInfo")(order.receiptNo, "wrong").ok, false);
+    assert.strictEqual(env.run("fixInfo")(order.receiptNo, "").ok, false);
+    assert.strictEqual(env.run("fixSubmit")(order.receiptNo, "wrong", "x@y.com:zz").ok, false);
+    const info = env.run("fixInfo")(order.receiptNo, TK);
+    assert.strictEqual(info.ok, true);
+    assert.strictEqual(info.hint, "a***@b.com");
+    assert.ok(JSON.stringify(info).indexOf("secretPW99") < 0);
+    assert.strictEqual(env.run("fixSubmit")(order.receiptNo, TK, "  ").ok, false, "空は受け付けない");
+  });
+  test("入力し直すと、代行中に戻って代行者の一覧に「入力し直しました」付きで出る", () => {
+    const d = discordCalls(env).length;
+    assert.strictEqual(env.run("fixSubmit")(order.receiptNo, TK, "a@b.com:RightPW77").ok, true);
+    assert.strictEqual(status(), "代行中");
+    assert.strictEqual(sheet().getRange(2, 7).getValue(), "a@b.com:RightPW77");
+    const w = env.run("workerList")("workerpw").list;
+    assert.strictEqual(w.length, 1); assert.strictEqual(w[0].fixed, true); assert.strictEqual(w[0].account, "a@b.com:RightPW77");
+    const note = discordCalls(env).slice(d).map(c => JSON.stringify(c.body)).join("");
+    assert.ok(note.indexOf("入力し直されました") >= 0 && note.indexOf("RightPW77") < 0, "Discordにパスワードが載っている／通知がない");
+    assert.strictEqual(env.run("fixSubmit")(order.receiptNo, TK, "x@y.com:again1").ok, false, "終わったリンクは使えない");
+    assert.strictEqual(env.run("fixInfo")(order.receiptNo, TK).ok, false);
+  });
+  test("LINE未連携のお客さんの場合は、入力し直し用リンクをDiscordで管理者に渡す／管理ページにも出る", () => {
+    const o2 = submit({ contact: "c@d.com:pw2", requester: "次郎" });
+    env.run("adminSetStatus")("adminpw", o2.receiptNo, "代行中");
+    const d = discordCalls(env).length;
+    assert.strictEqual(env.run("workerLoginFail")("workerpw", o2.receiptNo).ok, true);
+    const msg = discordCalls(env).slice(d).map(c => (c.body && c.body.content) || "").join("");
+    assert.ok(msg.indexOf("LINE未連携") >= 0 && msg.indexOf("page=fix&no=" + encodeURIComponent(o2.receiptNo)) >= 0, msg);
+    const det = env.run("adminDetail")("adminpw", o2.receiptNo);
+    assert.ok(det.fixUrl.indexOf("page=fix") >= 0);
+    assert.strictEqual(env.run("adminDetail")("adminpw", order.receiptNo).fixUrl, "", "再入力待ちでなければリンクは出さない");
+    assert.strictEqual(env.run("adminStats")("adminpw").counts["再入力待ち"], 1);
+    env.run("adminSetStatus")("adminpw", o2.receiptNo, "完了");
   });
   test("代行者：納品完了にすると、お客さんにLINEが届く", () => {
     const n = lineCalls(env, "push").length;
@@ -452,6 +509,11 @@ const discordCalls = (env) => env.fetchLog.filter(c => c.url.indexOf("discord.te
     const env = mk(); env.run("setup")();
     post(env, "secretkey", [{ type: "message", replyToken: "r", webhookEventId: "g1", source: { type: "group", userId: "U1", groupId: "G" }, message: { type: "text", id: "g1", text: "料金" } }]);
     assert.strictEqual(lineCalls(env, "reply").length, 0);
+  });
+  test("APP_URL を設定すると、リンクにそのURLを使う", () => {
+    const env = mk({ APP_URL: "https://script.google.com/macros/s/REAL/exec" });
+    assert.strictEqual(env.run("appUrl")(), "https://script.google.com/macros/s/REAL/exec");
+    assert.strictEqual(mk().run("appUrl")(), "https://script.google.com/macros/s/TEST/exec");
   });
   test("checkSecrets：足りない設定を教える（中身は表示しない）", () => {
     const env = makeEnv({ LINE_TOKEN: "SECRETVALUE" });
