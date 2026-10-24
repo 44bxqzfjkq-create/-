@@ -24,7 +24,12 @@ var BOT = {
   CRED_REPLY: "セキュリティのため、IDやパスワードはLINEに送らないでください🙏\n必要な情報は、注文フォームからお送りください。\n（すでに送ってしまった場合は、そのメッセージの送信取消をお願いします）",
   NON_TEXT_REPLY: "メッセージありがとうございます。担当者が確認します。",
   NO_LINK_REPLY: "まだ注文とLINEが結びついていません。\n注文フォームの完了画面にある「LINEで受付を完了する」ボタンから、LINEにメッセージを送ってください。",
-  DONE_REPLY: "ありがとうございます！確認できました🙌\nこれで完了です。またのご利用をお待ちしております。"
+  DONE_REPLY: "ありがとうございます！確認できました🙌\nこれで完了です。またのご利用をお待ちしております。",
+  THANKS_REPLY: "こちらこそありがとうございます😊\nほかにご不明な点があれば、お気軽にどうぞ。",
+  HOLD_REPLY: "担当者が確認中です。順番にご連絡しますので、もう少しお待ちください🙏",
+  BUSY_REPLY: "ただいま問い合わせが混み合っています。しばらく時間をおいて、もう一度お送りください🙏",
+  AI_LIMIT_USER: 30,        // 1人あたり、1時間にAIを使える回数
+  AI_LIMIT_ALL: 300         // 全体で、6時間にAIを使える回数（使いすぎ・いたずら対策）
 };
 
 var BOT_DRY_RUN = false;            // true のとき、LINEには送らずログに出すだけ（テスト用）
@@ -43,15 +48,32 @@ function clip(s, n) {
 /** Discordで@everyoneなどが動かないようにする */
 function noMention(s) { return String(s || "").replace(/@/g, "＠"); }
 
+/** パスワードらしい英数字のかたまりか（「LINE」「reset?」のような普通の単語は除く）*/
+function strongToken(tok) {
+  return /\d/.test(tok) || tok.length >= 8 || /[^A-Za-z0-9?!.,]/.test(tok);
+}
+
 /** IDやパスワードらしき文字か（疑わしいものは、止める側に倒しています）*/
 function looksLikeCredentials(text) {
   var t = normalizeText(text);
   if (!t) return false;
   if (/^T-\d{8}-\d{3}$/.test(t)) return false; // 受付番号だけ
-  if (/(パスワード|ぱすわーど|password|passwd|\bpass\b|\bpw\b)[^\n]{0,6}?[!-~]{4,}/i.test(t)) return true;
-  if (/[\w.+-]+@[\w-]+(?:\.[\w-]+)+[ :\/|,]+[!-~]{4,}/.test(t)) return true; // メール＋何か
+  if (/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/.test(t)) return true; // メールアドレス（ログインIDそのもの）
+  // 「パスワード」などの言葉のあとに、パスワードらしい英数字があるか
+  var kw = /(パスワード|ぱすわーど|password|passwd|\bpass\b|\bpw\b|パス|暗証番号|\bpin\b)/ig, m;
+  while ((m = kw.exec(t))) {
+    var after = t.slice(m.index + m[0].length, m.index + m[0].length + 40);
+    var toks = after.match(/[!-~]{4,}/g) || [];
+    for (var i = 0; i < toks.length; i++) { if (strongToken(toks[i])) return true; }
+  }
   if (/(?:^|[\s,、])(?:id|ユーザーid|ユーザid|アカウント|アカ|メール(?:アドレス)?|mail|e-?mail|ログイン(?:id)?)\s*[:=]\s*[!-~]{3,}/i.test(t)) return true;
-  if (/^[!-~]{8,}$/.test(t) && /[A-Za-z]/.test(t) && /\d/.test(t) && !/^https?:/i.test(t)) return true; // 1語だけの英数字
+  // 日本語がなく英数字だけのメッセージ（「abc12345」「0901234567 abcd1234」など）
+  if (/^[!-~ ]{8,}$/.test(t) && !/T-\d{8}-\d{3}/.test(t) && !/https?:/i.test(t)) {
+    var words = t.split(" ");
+    for (var j = 0; j < words.length; j++) {
+      if (words[j].length >= 6 && /[A-Za-z]/.test(words[j]) && /\d/.test(words[j])) return true;
+    }
+  }
   return false;
 }
 
@@ -342,12 +364,52 @@ function handleTextMessage(userId, replyToken, rawText) {
   }
   // 5. 納品済のあとの「ありがとう」→ 完了
   var delivered = orders.filter(function (o) { return o.status === "納品済"; });
-  if (delivered.length && looksLikeClosing(text)) {
+  var closing = looksLikeClosing(text);
+  if (delivered.length && closing) {
     completeByCustomer(userId, replyToken, name, text, delivered);
     return;
   }
-  // 6. AI
+  // 6. 担当者が対応中のお客さん：ボットは口を挟まず、担当者に知らせる
+  if (rec.status === "担当者待ち") {
+    lineReply(replyToken, BOT.HOLD_REPLY);
+    addHistory(userId, text, BOT.HOLD_REPLY);
+    upsertLineRecord(userId, name, {});
+    notifyStaff(name, orders, text, "担当者待ちのお客さんから、続けてメッセージが届きました");
+    return;
+  }
+  // 7. 納品前の「ありがとう」など：AIを使わず定型で返す
+  if (closing) {
+    lineReply(replyToken, BOT.THANKS_REPLY);
+    addHistory(userId, text, BOT.THANKS_REPLY);
+    upsertLineRecord(userId, name, {});
+    return;
+  }
+  // 8. AIの使いすぎ・いたずら対策
+  if (!aiAllowed(userId)) {
+    lineReply(replyToken, BOT.BUSY_REPLY);
+    upsertLineRecord(userId, name, {});
+    return;
+  }
+  // 9. AI
   answerWithAi(userId, replyToken, name, text, rec, orders, delivered);
+}
+
+/** AIを呼んでよいか（1人あたり・全体の回数を数える。上限に達したら担当者に1回知らせる）*/
+function aiAllowed(userId) {
+  var cache = CacheService.getScriptCache();
+  var u = Number(cache.get("ai_u_" + userId) || 0);
+  var g = Number(cache.get("ai_all") || 0);
+  if (u >= BOT.AI_LIMIT_USER) return false;
+  if (g >= BOT.AI_LIMIT_ALL) {
+    if (!cache.get("ai_all_notified")) {
+      cache.put("ai_all_notified", "1", 21600);
+      notifyAdmin("⚠️ AIの利用回数が上限（6時間に" + BOT.AI_LIMIT_ALL + "回）に達しました。しばらくの間、AIの返事は止まり「混み合っています」と返します。いたずらでなければ Bot.gs の AI_LIMIT_ALL を増やしてください。");
+    }
+    return false;
+  }
+  cache.put("ai_u_" + userId, String(u + 1), 3600);
+  cache.put("ai_all", String(g + 1), 21600);
+  return true;
 }
 
 function handleLink(userId, replyToken, name, link) {
@@ -423,10 +485,46 @@ function answerWithAi(userId, replyToken, name, text, rec, orders, delivered) {
   lineReply(replyToken, reply);
   addHistory(userId, text, reply);
 
-  var status = ai.needStaff ? "担当者待ち" : (rec.status === "担当者待ち" ? "担当者待ち" : "ボット対応");
-  if (done && status === "ボット対応") status = "完了";
+  var status = ai.needStaff ? "担当者待ち" : (done ? "完了" : "ボット対応");
   upsertLineRecord(userId, name, { summary: ai.summary || rec.summary, status: status });
   if (ai.needStaff) notifyStaff(name, orders, text, "マニュアルにない内容、または担当者対応が必要な内容です");
+}
+
+// ===================================================================
+// 管理ページ用：担当者待ちのお問い合わせ
+// ===================================================================
+function adminInquiries(key) {
+  if (!isAdmin(key)) return { ok: false };
+  var sh = lineSheet(), out = [], last = sh.getLastRow();
+  if (last >= 2) {
+    var v = sh.getRange(2, 1, last - 1, 6).getValues();
+    for (var i = 0; i < v.length; i++) {
+      if (String(v[i][3]) !== "担当者待ち") continue;
+      out.push({ uid: String(v[i][5]), time: fmtCell(v[i][0]), name: String(v[i][1]), summary: String(v[i][2]), receiptNo: String(v[i][4]) });
+    }
+  }
+  return { ok: true, list: out.reverse() };
+}
+
+/** 担当者の対応が終わった → ボットの返事を再開する */
+function adminResolveInquiry(key, uid) {
+  if (!isAdmin(key)) return { ok: false };
+  var sh = lineSheet();
+  var row = findLineRow(sh, String(uid || ""));
+  if (!row || String(sh.getRange(row, 4).getValue()) !== "担当者待ち") return { ok: false };
+  sh.getRange(row, 4).setValue("担当者対応済");
+  return { ok: true };
+}
+
+function adminSendLineInquiry(key, uid, text) {
+  if (!isAdmin(key)) return { ok: false };
+  text = String(text || "").trim();
+  if (!text) return { ok: false, reason: "メッセージが空です。" };
+  var sh = lineSheet();
+  var row = findLineRow(sh, String(uid || ""));
+  if (!row) return { ok: false, reason: "お客さんが見つかりません。" };
+  if (uid === "TEST_USER") return { ok: false, reason: "テスト用の行には送れません。" };
+  return linePush(String(uid), text) ? { ok: true } : { ok: false, reason: "LINEへの送信に失敗しました。" };
 }
 
 // ===================================================================
@@ -496,16 +594,18 @@ function handleEvent(ev) {
  */
 function testBotSamples() {
   BOT_DRY_RUN = true;
+  resetTestData(); // 前回のテストの「担当者待ち」などが残っていると結果が変わるので、先に消す
   var samples = [
-    "1",
     "料金",
     "流れ",
+    "1",
     "パスワードはabc12345です",
     "メール taro@example.com pass1234",
+    "進捗",
+    "ありがとう",
     "納期はどれくらいですか？",
     "返金してほしいです",
-    "進捗",
-    "ありがとう"
+    "いつ連絡もらえますか"
   ];
   samples.forEach(function (t) {
     BOT_STATE.replied = false;
@@ -518,9 +618,14 @@ function testBotSamples() {
 
 /** テストで作った行・会話の記憶を消します */
 function cleanupTestData() {
+  resetTestData();
+  Logger.log("テストデータを消しました。");
+}
+function resetTestData() {
   var sh = lineSheet();
   var row = findLineRow(sh, "TEST_USER");
   if (row) sh.deleteRow(row);
-  CacheService.getScriptCache().remove("hist_TEST_USER");
-  Logger.log("テストデータを消しました。");
+  var cache = CacheService.getScriptCache();
+  cache.remove("hist_TEST_USER");
+  cache.remove("ai_u_TEST_USER");
 }

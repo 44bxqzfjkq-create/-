@@ -135,11 +135,14 @@ const discordCalls = (env) => env.fetchLog.filter(c => c.url.indexOf("discord.te
 
   test("IDやパスワードらしき文字を見つける", () => {
     ["パスワードはabc12345です", "password: Tsumu1234", "メール taro@example.com pass1234", "taro@example.com:Pass1234",
-     "ID: tsumu_user1", "ＩＤ：abc123", "Tsumu1234!!", "ログインID=abc12345"].forEach(t => assert.ok(cred(t), "検出できない: " + t));
+     "ID: tsumu_user1", "ＩＤ：abc123", "Tsumu1234!!", "ログインID=abc12345",
+     "パス abcd1234", "taro@example.com", "0901234567 abcd1234", "ぱすわーど tsumu2024", "パスワード：Hanako_Tsum",
+     "メアド taro@example.com　パス Qwerty99", "暗証番号 1234abcd"].forEach(t => assert.ok(cred(t), "検出できない: " + t));
   });
   test("ふつうの質問は止めない", () => {
     ["パスワードは必要ですか？", "パスワード変更はできますか", "納期はどれくらいですか？", "T-20261024-001",
-     "受付番号 T-20261024-001 コード a1b2c3", "ありがとうございます", "料金を教えてください", "09012345678", "メールアドレスは必要ですか"]
+     "受付番号 T-20261024-001 コード a1b2c3", "ありがとうございます", "料金を教えてください", "09012345678", "メールアドレスは必要ですか",
+     "パスワードはLINEで送ればいいですか？", "password reset?", "OK thanks", "パスタ食べたい", "https://example.com/abc123"]
       .forEach(t => assert.ok(!cred(t), "止めてしまう: " + t));
   });
   test("お礼・確認の言葉は「完了」と察知する", () => {
@@ -352,13 +355,47 @@ const discordCalls = (env) => env.fetchLog.filter(c => c.url.indexOf("discord.te
     assert.ok(lastReply().indexOf("担当者から連絡します") >= 0);
     assert.ok(lastReply().indexOf("ご自由に") < 0);
   });
-  test("納品前の「ありがとう」では完了にしない（AIが普通に返事する）", () => {
+  test("納品前の「ありがとう」では完了にしない（AIを使わず定型で返す）", () => {
     const n = aiCalls(env).length;
-    ai({ reply: "どういたしまして！", summary: "お礼" });
     handle("U3", "ありがとう");
-    assert.strictEqual(aiCalls(env).length, n + 1);
-    assert.ok(lastReply().indexOf("どういたしまして") >= 0);
+    assert.strictEqual(aiCalls(env).length, n);
+    assert.ok(lastReply().indexOf("こちらこそ") >= 0, lastReply());
     assert.ok(lastReply().indexOf("完了です") < 0);
+  });
+  test("担当者待ちの間は、ボットがAIで返事をせず、担当者に知らせる／対応済にすると再開する", () => {
+    const n = aiCalls(env).length, d = discordCalls(env).length;
+    handle("U7", "いつ連絡もらえますか"); // U7 は上のテストで「担当者待ち」になっている
+    assert.strictEqual(aiCalls(env).length, n, "担当者待ちなのにAIを呼んだ");
+    assert.ok(lastReply().indexOf("担当者が確認中") >= 0, lastReply());
+    assert.ok(discordCalls(env).length > d, "担当者に知らせていない");
+    assert.ok(discordCalls(env).pop().body.content.indexOf("いつ連絡もらえますか") >= 0);
+    handle("U7", "料金"); // 決まった返事は、担当者待ちでも返る
+    assert.ok(lastReply().indexOf("料金表") >= 0);
+
+    const inq = env.run("adminInquiries")("adminpw");
+    assert.ok(inq.ok && inq.list.some(q => q.uid === "U7" && q.summary === "返金希望"), JSON.stringify(inq));
+    assert.strictEqual(env.run("adminInquiries")("bad").ok, false);
+    assert.strictEqual(env.run("adminResolveInquiry")("bad", "U7").ok, false);
+    const p = lineCalls(env, "push").length;
+    assert.strictEqual(env.run("adminSendLineInquiry")("adminpw", "U7", "確認しました、返金します").ok, true);
+    assert.strictEqual(lineCalls(env, "push")[p].body.to, "U7");
+    assert.strictEqual(env.run("adminResolveInquiry")("adminpw", "U7").ok, true);
+    assert.ok(!env.run("adminInquiries")("adminpw").list.some(q => q.uid === "U7"));
+
+    ai({ reply: "はい、承ります。", summary: "再開" });
+    handle("U7", "別の質問です");
+    assert.strictEqual(aiCalls(env).length, n + 1, "対応済にしたのにAIが再開しない");
+    assert.ok(lastReply().indexOf("承ります") >= 0);
+  });
+  test("AIの使いすぎを止める（1人1時間30回まで）", () => {
+    const n = aiCalls(env).length;
+    for (let i = 0; i < 30; i++) { ai({}); handle("U2", "質問" + i); }
+    assert.strictEqual(aiCalls(env).length, n + 30);
+    handle("U2", "質問31");
+    assert.strictEqual(aiCalls(env).length, n + 30, "上限を超えてもAIを呼んだ");
+    assert.ok(lastReply().indexOf("混み合って") >= 0, lastReply());
+    handle("U2", "料金"); // 決まった返事は使える
+    assert.ok(lastReply().indexOf("料金表") >= 0);
   });
   test("Discordの通知に、お客さんの文章の@が入っても、全員宛メンションにならない", () => {
     env.aiQueue.push({ error: 500 });
@@ -421,6 +458,7 @@ const discordCalls = (env) => env.fetchLog.filter(c => c.url.indexOf("discord.te
     env.run("checkSecrets")();
     const log = env.logs.join("\n");
     assert.ok(log.indexOf("未設定 CLAUDE_API_KEY") >= 0 && log.indexOf("OK    LINE_TOKEN") >= 0);
+    assert.ok(log.indexOf("未設定 LINE_BASIC_ID") >= 0, "LINE_BASIC_ID がないとボタンが出ないので必須");
     assert.ok(log.indexOf("SECRETVALUE") < 0);
   });
 }

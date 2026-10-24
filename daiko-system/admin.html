@@ -47,6 +47,10 @@
 
   <div id="main" style="display:none">
     <div class="tiles" id="tiles"></div>
+    <div id="inqBox" style="display:none">
+      <div class="hint">🙋 担当者待ちのお問い合わせ（このお客さんにはボットが返事を止めています。対応が終わったら「対応済にする」を押すと、ボットが再開します）</div>
+      <div id="inq"></div>
+    </div>
     <div class="tabs" id="tabs"></div>
     <div class="layout">
       <div class="list" id="list"></div>
@@ -97,6 +101,37 @@
       $("tiles").innerHTML = t("未対応", s.counts["未対応"] + "件") + t("代行中", s.counts["代行中"] + "件") +
         t("納品済", s.counts["納品済"] + "件") + t("今日の売上", yen(s.todaySum)) + t("今月の売上", yen(s.monthSum));
     }).adminStats(KEY);
+    loadInquiries();
+  }
+
+  function loadInquiries(){
+    google.script.run.withSuccessHandler(function(r){
+      if (!r || !r.ok) return;
+      $("inqBox").style.display = r.list.length ? "block" : "none";
+      $("inq").innerHTML = r.list.map(function(q, i){
+        return '<div class="card" data-uid="' + esc(q.uid) + '">' +
+          '<div><b>' + esc(q.name) + '</b>　<span class="hint">' + esc(q.time) + (q.receiptNo ? '　' + esc(q.receiptNo) : '') + '</span></div>' +
+          '<div>' + esc(q.summary || "（要約なし）") + '</div>' +
+          '<textarea class="qmsg" placeholder="お客さんへの返事（LINEで届きます）" style="height:56px;margin-top:6px"></textarea>' +
+          '<div class="btns"><button class="blue qsend">LINEで送る</button><button class="qdone">対応済にする</button><span class="hint qres"></span></div></div>';
+      }).join("");
+      Array.prototype.forEach.call($("inq").querySelectorAll(".card[data-uid]"), function(card){
+        var uid = card.getAttribute("data-uid"), res = card.querySelector(".qres");
+        card.querySelector(".qsend").addEventListener("click", function(){
+          var t = card.querySelector(".qmsg").value.trim();
+          if (!t) return;
+          res.textContent = "送信中...";
+          google.script.run.withSuccessHandler(function(r){
+            if (r && r.ok) { card.querySelector(".qmsg").value = ""; res.textContent = "送信しました。"; }
+            else { res.textContent = "送れませんでした：" + ((r && r.reason) || ""); }
+          }).withFailureHandler(function(e){ res.textContent = "エラー: " + (e && e.message ? e.message : e); }).adminSendLineInquiry(KEY, uid, t);
+        });
+        card.querySelector(".qdone").addEventListener("click", function(){
+          if (!confirm("このお客さんを「対応済」にして、ボットの返事を再開します。よろしいですか？")) return;
+          google.script.run.withSuccessHandler(function(){ loadInquiries(); }).adminResolveInquiry(KEY, uid);
+        });
+      });
+    }).adminInquiries(KEY);
   }
 
   function renderAll(){ renderTabs(); renderList(); if (CUR) loadDetail(); }

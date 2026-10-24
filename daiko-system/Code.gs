@@ -469,8 +469,8 @@ function setup() {
 
 /** 秘密の設定がそろっているか確認します（中身は表示しません）*/
 function checkSecrets() {
-  var need = ["LINE_TOKEN", "CLAUDE_API_KEY", "WEBHOOK_KEY", "ADMIN_KEY", "WORKER_KEY", "DISCORD_NORMAL", "DISCORD_PRIORITY"];
-  var optional = ["LINE_BASIC_ID", "TEST_MODE", "TEST_USER_ID"];
+  var need = ["LINE_TOKEN", "CLAUDE_API_KEY", "WEBHOOK_KEY", "ADMIN_KEY", "WORKER_KEY", "DISCORD_NORMAL", "DISCORD_PRIORITY", "LINE_BASIC_ID"];
+  var optional = ["TEST_MODE", "TEST_USER_ID"];
   var missing = 0;
   need.forEach(function (n) { var ok = !!prop(n); if (!ok) missing++; Logger.log((ok ? "OK    " : "未設定 ") + n); });
   optional.forEach(function (n) { Logger.log((prop(n) ? "設定あり " : "（なし）  ") + n + "  ※必要なときだけ"); });
