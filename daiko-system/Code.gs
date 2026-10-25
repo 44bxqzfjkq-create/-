@@ -266,7 +266,7 @@ function applyStatusEffects(sheet, row, status, opts) {
   var userId = String(sheet.getRange(row, LINE_COL).getValue());
 
   if (status === "納品済") {
-    var msg = "ご依頼の代行が完了し、商品を納品しました🎉\n内容をご確認いただき、問題なければ「OK」や「ありがとう」と返信してください。\n気になる点があれば、そのままご連絡ください。";
+    var msg = "🎉 代行が完了し、商品を納品しました！\n\n✅ 内容をご確認ください\n👍 問題なければ「OK」や「ありがとう」と返信してください\n💬 気になる点があれば、そのままご連絡ください";
     if (!(userId && linePush(userId, msg))) {
       notifyAdmin("⚠️ " + receiptNo + " は納品済にしましたが、LINEでお知らせできませんでした（LINE未連携）。手動でご連絡ください。");
     }
@@ -280,7 +280,7 @@ function applyStatusEffects(sheet, row, status, opts) {
   if (status === "完了") {
     deleteDiscordMessage(sheet, row);
     if (userId) {
-      if (opts.notifyCustomer !== false) linePush(userId, "ご利用ありがとうございました🙏\nまたのご利用をお待ちしております。");
+      if (opts.notifyCustomer !== false) linePush(userId, "🙏 ご利用ありがとうございました！\nまたのご利用をお待ちしております😊");
       markLineRecordDone(userId);
     }
   }
@@ -304,9 +304,9 @@ function fixUrl(sheet, row) {
     "&t=" + encodeURIComponent(String(sheet.getRange(row, TOKEN_COL).getValue()));
 }
 function refillMessage(receiptNo, url) {
-  return "【受付番号 " + receiptNo + "】\nご入力いただいたアカウントで、ログインできませんでした🙏\n" +
-    "お手数ですが、下のリンクから、メールアドレスとパスワードをもう一度入力してください。\n" + url +
-    "\n\n※IDやパスワードは、このトークには送らないでください。\n※入力が終わると、自動で代行を再開します。";
+  return "🔑【受付番号 " + receiptNo + "】\nご入力いただいたアカウントで、ログインできませんでした🙏\n\n" +
+    "👇 お手数ですが、こちらからメールアドレスとパスワードを入力し直してください\n" + url +
+    "\n\n⚠️ IDやパスワードは、このトークには送らないでください\n✅ 入力が終わると、自動で代行を再開します";
 }
 /** リンクの受付番号と合言葉が正しく、いま「再入力待ち」の行を探す（なければ 0）*/
 function findFixRow(sheet, receiptNo, tk) {

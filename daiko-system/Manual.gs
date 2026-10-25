@@ -54,7 +54,7 @@ function buildPriceList() {
   var lines = [];
   for (var name in CONFIG.MENUS) {
     if (Object.prototype.hasOwnProperty.call(CONFIG.MENUS, name)) {
-      lines.push("・" + name + "：" + CONFIG.MENUS[name] + "円");
+      lines.push("🔹" + name + "：" + CONFIG.MENUS[name] + "円");
     }
   }
   return lines.join("\n");
