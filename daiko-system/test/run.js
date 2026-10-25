@@ -491,6 +491,19 @@ const discordCalls = (env) => env.fetchLog.filter(c => c.url.indexOf("discord.te
     post(env, "secretkey", [msg("Umine", "料金", "e6")]);
     assert.strictEqual(lineCalls(env, "reply").length, 2);
   });
+  test("テストモードは「ON」「オン」「 on 」など、書き方の違いがあっても効く", () => {
+    ["ON", "オン", " on ", "ｏｎ"].forEach(v => {
+      const env = mk({ TEST_MODE: v, TEST_USER_ID: " Umine " }); env.run("setup")();
+      post(env, "secretkey", [msg("Uother", "はい", "x" + v)]);
+      assert.strictEqual(lineCalls(env, "reply").length, 0, "他人に返事した: " + JSON.stringify(v));
+      post(env, "secretkey", [msg("Umine", "料金", "y" + v)]);
+      assert.strictEqual(lineCalls(env, "reply").length, 1, "自分に返事しない: " + JSON.stringify(v));
+      env.run("checkSecrets")();
+      assert.ok(env.logs.join("\n").indexOf("【テストモード】") >= 0);
+    });
+    const env = mk(); env.run("checkSecrets")();
+    assert.ok(env.logs.join("\n").indexOf("【本番モード】") >= 0);
+  });
   test("本番モードでは「ID確認」は特別扱いしない", () => {
     const env = mk(); env.run("setup")();
     env.aiQueue.push({ text: JSON.stringify({ reply: "はい", need_staff: false, closing: false, summary: "x" }) });

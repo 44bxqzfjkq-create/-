@@ -45,6 +45,11 @@ function clip(s, n) {
   s = String(s || "");
   return s.length > n ? s.slice(0, n) : s;
 }
+/** テストモードか（「on」「ON」「オン」、前後の空白などの違いは気にしない）*/
+function isTestMode() {
+  var v = normalizeText(prop("TEST_MODE")).toLowerCase();
+  return v === "on" || v === "オン" || v === "true" || v === "1";
+}
 /** Discordで@everyoneなどが動かないようにする */
 function noMention(s) { return String(s || "").replace(/@/g, "＠"); }
 
@@ -570,12 +575,12 @@ function handleEvent(ev) {
     var isText = ev.message && ev.message.type === "text";
 
     // テストモード：自分のLINEだけに返事する
-    if (prop("TEST_MODE") === "on") {
+    if (isTestMode()) {
       if (isText && normalizeText(ev.message.text) === "ID確認") {
         lineReply(ev.replyToken, "あなたのIDです（テスト用）：\n" + userId);
         return;
       }
-      if (userId !== prop("TEST_USER_ID")) return;
+      if (userId !== normalizeText(prop("TEST_USER_ID"))) return;
     }
 
     if (isText) { handleTextMessage(userId, ev.replyToken, ev.message.text); return; }

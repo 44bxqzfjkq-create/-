@@ -559,6 +559,9 @@ function checkSecrets() {
   need.forEach(function (n) { var ok = !!prop(n); if (!ok) missing++; Logger.log((ok ? "OK    " : "未設定 ") + n); });
   optional.forEach(function (n) { Logger.log((prop(n) ? "設定あり " : "（なし）  ") + n + "  ※必要なときだけ"); });
   Logger.log(missing ? "★ 未設定が " + missing + " 個あります。README の手順で追加してください。" : "必須の設定はすべてそろっています。");
+  Logger.log(isTestMode()
+    ? "いまは【テストモード】です。ボットは TEST_USER_ID の人（" + (prop("TEST_USER_ID") ? "設定あり" : "まだ未設定") + "）にだけ返事をします。"
+    : "いまは【本番モード】です。ボットは全員に返事をします。");
 }
 
 function authorizeDrive() {
