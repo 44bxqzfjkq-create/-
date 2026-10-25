@@ -10,6 +10,7 @@ const assert = require("assert");
 const root = path.join(__dirname, "..");
 let passed = 0;
 const results = [];
+const ALL_LINE_TEXTS = []; // ボットがLINEに送った文章（あとで、スマホの幅に収まっているか調べる）
 function test(name, fn) {
   try { fn(); passed++; results.push("  OK   " + name); }
   catch (e) { results.push("  NG   " + name + "\n         " + (e && e.message ? e.message : e)); process.exitCode = 1; }
@@ -97,6 +98,7 @@ function makeEnv(props) {
         opts = opts || {};
         const body = opts.payload ? JSON.parse(opts.payload) : null;
         fetchLog.push({ url, method: opts.method || "get", body, headers: opts.headers || {} });
+        if (url.indexOf("api.line.me/v2/bot/message") >= 0 && body) body.messages.forEach(m => ALL_LINE_TEXTS.push(m.text));
         const res = (code, text) => ({ getResponseCode: () => code, getContentText: () => text });
         if (url.indexOf("api.anthropic.com") >= 0) {
           const next = aiQueue.shift();
@@ -182,7 +184,9 @@ const discordCalls = (env) => env.fetchLog.filter(c => c.url.indexOf("discord.te
     assert.strictEqual(fixed("1"), null); assert.strictEqual(fixed("メニュー"), null); assert.strictEqual(fixed("納期"), null);
   });
   test("設定済みの決まった返事は、そのまま返す（全角・大文字小文字の違いも吸収）", () => {
-    assert.ok(fixed("料金").indexOf("コイン指定（5万〜2億）：300円") >= 0);
+    assert.ok(fixed("料金").indexOf("💴 300円\n・コイン指定（5万〜2億）\n・ツムレベルMAX 1体") >= 0, fixed("料金"));
+    assert.ok(fixed("料金").indexOf("💴 1,500円\n・プレミアムBOX完売") >= 0, "値段の安い順にまとまっていない");
+    assert.ok(fixed("【このままメッセージどうぞ】").indexOf("どうぞ") >= 0);
     assert.ok(fixed(" 流れ ").indexOf("ご注文の流れ") >= 0);
     env.run('FIXED_REPLIES["1"] = "これは1番の返事です"; FIXED_REPLIES["ギフト"] = "ギフトの返事"');
     assert.strictEqual(fixed("１"), "これは1番の返事です");
@@ -191,6 +195,26 @@ const discordCalls = (env) => env.fetchLog.filter(c => c.url.indexOf("discord.te
   });
   test("AIに渡すマニュアルに料金表が入る", () => {
     assert.ok(env.run("buildManual")().indexOf("【料金表】") >= 0);
+    assert.ok(env.run("buildManual")().indexOf("コイン指定（5万〜2億）：300円") >= 0);
+  });
+  test("AIへの指示に、お店の名前・話し方・返事の例・守ること・マニュアルが入る", () => {
+    const p = env.run("buildSystemStatic")();
+    ["「じょーじ」", "【話し方】", "まず、聞かれたことにまっすぐ答えます", "【返事の例】", "need_staff: true",
+     "うそはつかずに", "【未設定】のこと", "【マニュアル】", "1行は全角14文字"].forEach(k => assert.ok(p.indexOf(k) >= 0, "入っていない: " + k));
+  });
+  test("AIの長い返事は、句読点のところで改行し直して、スマホで変に折り返さない", () => {
+    const wrap = (t) => env.run("wrapForPhone")(t, 14);
+    const w = env.run("displayWidth");
+    const long = "ご連絡ありがとうございます。どのようなご用件でしょうか？ご注文はメニューの「注文」から注文フォームをご利用ください。";
+    const out = wrap(long);
+    out.split("\n").forEach(l => assert.ok(w(l) <= 15, "長すぎる行: " + l + " (" + w(l) + ")"));
+    assert.strictEqual(out.replace(/\n/g, ""), long, "文字が消えたり増えたりしている");
+    const long2 = "料金やご注文の流れについてのご質問も、お気軽にどうぞ。";
+    wrap(long2).split("\n").forEach(l => assert.ok(w(l) <= 15, "長すぎる行: " + l));
+    assert.ok(wrap("すごいですね、ありがとうございます").indexOf("す\nごい") < 0, "言葉の途中で切っている");
+    assert.strictEqual(wrap("短い文です😊"), "短い文です😊");
+    assert.strictEqual(wrap("https://script.google.com/macros/s/AAAAAAAAAAAAAAAAAAAAAAAAAAA/exec"), "https://script.google.com/macros/s/AAAAAAAAAAAAAAAAAAAAAAAAAAA/exec", "URLは切らない");
+    assert.strictEqual(w("1️⃣ フォーム"), 2 + 0.5 + 4);
   });
 }
 
@@ -229,7 +253,7 @@ const discordCalls = (env) => env.fetchLog.filter(c => c.url.indexOf("discord.te
 
   test("コードが違うと結びつかない／正しいコードで結びつく", () => {
     handle("U1", "受付番号 " + order.receiptNo + " コード 000000");
-    assert.ok(lastReply().indexOf("確認コードが合いません") >= 0);
+    assert.ok(lastReply().indexOf("合いませんでした") >= 0, lastReply());
     assert.strictEqual(String(sheet().getRange(2, 14).getValue()), "");
     handle("U1", order.lineText);
     assert.ok(lastReply().indexOf("確認しました") >= 0, lastReply());
@@ -366,7 +390,7 @@ const discordCalls = (env) => env.fetchLog.filter(c => c.url.indexOf("discord.te
   test("IDやパスワードは、AIに送らず・記録にも会話の記憶にも残さない", () => {
     handle("U9", "パスワードはabc12345XYZです");
     assert.strictEqual(aiCalls(env).length, 0);
-    assert.ok(lastReply().indexOf("フォームからお送りください") >= 0);
+    assert.ok(lastReply().indexOf("注文フォームから\nお送りください") >= 0, lastReply());
     const everything = JSON.stringify(env.sheets) + JSON.stringify(env.cacheStore) + JSON.stringify(discordCalls(env));
     assert.ok(everything.indexOf("abc12345XYZ") < 0, "どこかに残っている");
     handle("U9", "taro@example.com Pass9999zz");
@@ -411,6 +435,13 @@ const discordCalls = (env) => env.fetchLog.filter(c => c.url.indexOf("discord.te
     handle("U5", "どうなってますか");
     assert.ok(lastReply().indexOf("担当者から連絡します") >= 0);
     assert.ok(lastReply().indexOf("ご自由に") < 0);
+  });
+  test("AIが長い1行で返事しても、お客さんには改行し直して届く", () => {
+    ai({ reply: "ご連絡ありがとうございます。どのようなご用件でしょうか？ご注文はメニューの「注文」から注文フォームをご利用ください。", summary: "用件" });
+    handle("U12", "こんにちは");
+    const r = lastReply();
+    assert.ok(r.split("\n").length >= 4, "改行されていない: " + r);
+    assert.strictEqual(r.replace(/\n/g, ""), "ご連絡ありがとうございます。どのようなご用件でしょうか？ご注文はメニューの「注文」から注文フォームをご利用ください。");
   });
   test("納品前の「ありがとう」では完了にしない（AIを使わず定型で返す）", () => {
     const n = aiCalls(env).length;
@@ -537,6 +568,31 @@ const discordCalls = (env) => env.fetchLog.filter(c => c.url.indexOf("discord.te
     assert.ok(log.indexOf("SECRETVALUE") < 0);
   });
 }
+
+// ---------------- 6. スマホでの見え方 ----------------
+test("ボットが送る文章は、どの行もスマホの吹き出しに収まる（全角14文字ぶんまで）", () => {
+  const width = (line) => { // Bot.gs とは別に、ここで独立して計算する
+    const cs = Array.from(line); let w = 0;
+    cs.forEach((ch, i) => {
+      const c = ch.codePointAt(0);
+      if (c === 0xFE0F || c === 0x200D) return;
+      if (c === 0x20E3) return;
+      if (cs[i + 1] === "\uFE0F" || c >= 0x1F000 || (c >= 0x2300 && c <= 0x23FF) || (c >= 0x2600 && c <= 0x27BF) || (c >= 0x2B00 && c <= 0x2BFF)) { w += 2; return; }
+      w += (c < 0x80 || (c >= 0xFF61 && c <= 0xFF9F)) ? 0.5 : 1;
+    });
+    return w;
+  };
+  const env = makeEnv(BASE_PROPS);
+  const fixedTexts = Object.keys(env.run("FIXED_REPLIES")).map(k => env.run("matchFixedReply")(k)).filter(Boolean);
+  const texts = ALL_LINE_TEXTS.concat(fixedTexts);
+  assert.ok(texts.length > 30, "調べる文章が少なすぎる: " + texts.length);
+  const bad = [];
+  texts.forEach(t => t.split("\n").forEach(l => {
+    if (/https?:/.test(l) || /^U[0-9a-z]+$/i.test(l)) return; // URLとIDは切れないので除く
+    if (width(l) > 14) bad.push(l + "（" + width(l) + "）");
+  }));
+  assert.deepStrictEqual(Array.from(new Set(bad)), []);
+});
 
 console.log("\n" + results.join("\n"));
 console.log("\n" + passed + " 件OK / " + (results.length - passed) + " 件NG");

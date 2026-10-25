@@ -8,6 +8,23 @@
  *     AIは勝手に答えず「担当者から連絡します」と返して、あなたに通知します。
  *   - 料金表は Code.gs の CONFIG.MENUS から自動で作られます（ここには書かなくてOK）。
  */
+/** お店の名前（AIが名乗るときに使います）*/
+var SHOP_NAME = "じょーじ";
+
+/**
+ * AIの話し方です。ここは自由に書き換えてOKです（事実は下のマニュアルに書きます）。
+ */
+var AI_STYLE = `
+- 本物のスタッフがスマホで返信しているように話します。丁寧だけど堅すぎない「です・ます」で、やさしく親しみやすく。
+- まず、聞かれたことにまっすぐ答えます。そのあと必要なら、次にやること（例：注文はメニューの「注文」から）を1つだけ添えます。
+- 「ご連絡ありがとうございます」などのあいさつは、会話の最初の1回だけ。毎回同じ書き出しにしません。
+- これまでのやり取りをふまえて話し、同じ説明を何度もくり返しません。
+- 返事は短く。全体で100〜150文字くらい、長くても200文字までにします。
+- 絵文字は1〜3個。文の頭や最後、大事なところに使います。
+- 質問するときは、1回に1つだけ。
+- お客さんがタメ口なら、少しくだけた言い方にしてもOK。ただし失礼な言葉は使いません。
+`;
+
 var MANUAL_TEXT = `
 【サービス概要】
 ツムツムの代行サービスです。
@@ -48,6 +65,21 @@ var MANUAL_TEXT = `
 【よくある質問】
 【未設定】（ここに「Q. ○○ / A. ○○」の形で書く）
 `;
+
+/** LINEで見せる料金表（同じ値段ごとにまとめて、スマホで折り返さない形にします）*/
+function buildPriceListForLine() {
+  var byPrice = {}, prices = [];
+  for (var name in CONFIG.MENUS) {
+    if (!Object.prototype.hasOwnProperty.call(CONFIG.MENUS, name)) continue;
+    var p = CONFIG.MENUS[name];
+    if (!byPrice[p]) { byPrice[p] = []; prices.push(p); }
+    byPrice[p].push(name);
+  }
+  prices.sort(function (a, b) { return a - b; });
+  return prices.map(function (p) {
+    return "💴 " + Number(p).toLocaleString("ja-JP") + "円\n" + byPrice[p].map(function (n) { return "・" + n; }).join("\n");
+  }).join("\n\n");
+}
 
 /** 料金表（CONFIG.MENUS から自動で作ります） */
 function buildPriceList() {
