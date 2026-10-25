@@ -196,6 +196,10 @@ const discordCalls = (env) => env.fetchLog.filter(c => c.url.indexOf("discord.te
   test("AIに渡すマニュアルに料金表が入る", () => {
     assert.ok(env.run("buildManual")().indexOf("【料金表】") >= 0);
     assert.ok(env.run("buildManual")().indexOf("コイン指定（5万〜2億）：300円") >= 0);
+    const m = env.run("buildManual")();
+    ["1時間〜3日", "5分〜24時間", "キャンセルはできません", "こちらのミスがあった場合は、返金します", "BANされることは、ほぼありません"]
+      .forEach(k => assert.ok(m.indexOf(k) >= 0, "マニュアルにない: " + k));
+    assert.ok(/【よくある質問】\s*【未設定】/.test(m), "よくある質問は、まだ担当者に回す");
   });
   test("AIへの指示に、お店の名前・話し方・返事の例・守ること・マニュアルが入る", () => {
     const p = env.run("buildSystemStatic")();
