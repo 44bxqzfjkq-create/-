@@ -32,7 +32,8 @@ var CONFIG = {
   PHOTO_FOLDER_NAME: "受付_支払い写真",
   REQUIRE_PHOTO: true,
   PRIORITY_KEYWORD: "依頼優先権",
-  REMIND_MINUTES: 30
+  REMIND_MINUTES: 30,
+  AUTO_COMPLETE_HOURS: 24    // 納品済のまま返事がないとき、何時間で自動で完了にするか
 };
 
 // 見出しの右側にある「内部用の列」（自動で隠します）
@@ -41,6 +42,7 @@ var TOKEN_COL = CONFIG.HEADER.length + 2;  // 確認コードの元（LINE連携
 var REMIND_COL = CONFIG.HEADER.length + 3; // リマインド済みの印
 var LINE_COL = CONFIG.HEADER.length + 4;   // お客さんのLINE（連携後に入る）
 var FIX_COL = CONFIG.HEADER.length + 5;    // お客さんがアカウントを入力し直した回数
+var DELIVERED_COL = CONFIG.HEADER.length + 6; // 納品済にした日時（自動で完了にするため）
 
 // ===== 小さな道具 =====
 function prop(name) {
@@ -266,7 +268,8 @@ function applyStatusEffects(sheet, row, status, opts) {
   var userId = String(sheet.getRange(row, LINE_COL).getValue());
 
   if (status === "納品済") {
-    var msg = "🎉 代行が完了して\n商品を納品しました！\n\n✅ 内容をご確認ください\n\n👍 問題なければ\n「OK」「ありがとう」と\n返信してください\n\n💬 気になる点があれば\nそのままご連絡ください";
+    sheet.getRange(row, DELIVERED_COL).setValue(new Date());
+    var msg = "🎉 代行が完了して\n商品を納品しました！\n\n✅ 内容をご確認ください\n\n👍 問題なければ\n「OK」「ありがとう」と\n返信してください\n\n💬 気になる点があれば\nそのままご連絡ください\n\n⏰ ご返信がなくても\n" + CONFIG.AUTO_COMPLETE_HOURS + "時間後に\n自動で完了になります";
     if (!(userId && linePush(userId, msg))) {
       notifyAdmin("⚠️ " + receiptNo + " は納品済にしましたが、LINEでお知らせできませんでした（LINE未連携）。手動でご連絡ください。");
     }
@@ -489,6 +492,7 @@ function workerLoginFail(key, receiptNo) {
 function remindUnhandled() {
   var sheet = ordersSheet();
   if (!sheet) return;
+  autoCompleteDelivered(sheet);
   var last = sheet.getLastRow();
   if (last < 2) return;
   var v = sheet.getRange(2, 1, last - 1, REMIND_COL).getValues();
@@ -501,6 +505,30 @@ function remindUnhandled() {
     if ((now - t) / 60000 >= CONFIG.REMIND_MINUTES) {
       notifyAdmin("⏰ まだ未対応の依頼があります\n受付番号: " + v[i][col("受付番号") - 1] + "\n依頼者: " + v[i][col("依頼者") - 1] + "\n" + appUrl() + "?page=admin");
       sheet.getRange(i + 2, REMIND_COL).setValue("done");
+    }
+  }
+}
+
+/**
+ * 納品済のまま、お客さんから返事がない依頼を、決めた時間（24時間）で自動で完了にする
+ * （remindUnhandled と一緒に、30分ごとに動きます。担当者が対応中のお客さんは除きます）
+ */
+function autoCompleteDelivered(sheet) {
+  var last = sheet.getLastRow();
+  if (last < 2) return;
+  var v = sheet.getRange(2, 1, last - 1, DELIVERED_COL).getValues();
+  var now = new Date();
+  for (var i = 0; i < v.length; i++) {
+    if (normStatus(v[i][col("ステータス") - 1]) !== "納品済") continue;
+    var row = i + 2;
+    var t = toDate(v[i][DELIVERED_COL - 1]);
+    if (!v[i][DELIVERED_COL - 1] || !t) { sheet.getRange(row, DELIVERED_COL).setValue(now); continue; } // 時刻がない古い行は、今から数える
+    if ((now - t) / 3600000 < CONFIG.AUTO_COMPLETE_HOURS) continue;
+    var userId = String(v[i][LINE_COL - 1]);
+    if (userId && getLineRecord(userId).status === "担当者待ち") continue; // 問題が起きているかもしれないので、残す
+    setOrderStatus(sheet, row, "完了", { notifyCustomer: false });
+    if (userId) {
+      linePush(userId, "✅ 受付番号\n" + v[i][col("受付番号") - 1] + "\n\n納品から" + CONFIG.AUTO_COMPLETE_HOURS + "時間たったので\n完了にしました。\nご利用ありがとう\nございました🙏\n\n💬 気になる点があれば\nいつでもご連絡ください");
     }
   }
 }
@@ -535,7 +563,8 @@ function setup() {
   sheet.getRange(1, REMIND_COL).setValue("_reminded");
   sheet.getRange(1, LINE_COL).setValue("_lineUser");
   sheet.getRange(1, FIX_COL).setValue("_fix");
-  sheet.hideColumns(MSG_ID_COL, 5);
+  sheet.getRange(1, DELIVERED_COL).setValue("_delivered");
+  sheet.hideColumns(MSG_ID_COL, 6);
   var rule = SpreadsheetApp.newDataValidation().requireValueInList(CONFIG.STATUSES, true).build();
   sheet.getRange(2, col("ステータス"), Math.max(sheet.getMaxRows() - 1, 1), 1).setDataValidation(rule);
 

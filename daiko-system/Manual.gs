@@ -37,7 +37,13 @@ var MANUAL_TEXT = `
 4. 受付した順番に、代行を進めます。
 5. 代行が終わって商品を納品したら、LINEでお知らせします。
 6. 内容を確認して、「OK」や「ありがとう」などを送ってもらえたら、すべて完了です。
+- 返信がなくても、納品から24時間たつと、自動で完了になります。
 - 進み具合は、LINEで「進捗」と送ると確認できます。
+
+【料金の数え方】
+- 料金表の値段は、商品1つあたりの値段です。
+- 選んだ商品の値段を足したものが、お支払い金額です（注文フォームで自動で計算されます）。
+- 例：コイン指定（300円）とBAN保証（300円）を選んだら、300円＋300円＝600円です。
 
 【お支払い】
 - お支払い方法はPayPayです。
@@ -71,19 +77,14 @@ var MANUAL_TEXT = `
 【未設定】（ここに「Q. ○○ / A. ○○」の形で書く）
 `;
 
-/** LINEで見せる料金表（同じ値段ごとにまとめて、スマホで折り返さない形にします）*/
+/** LINEで見せる料金表（1つずつ値段を書いて、スマホで折り返さない形にします）*/
 function buildPriceListForLine() {
-  var byPrice = {}, prices = [];
+  var lines = [];
   for (var name in CONFIG.MENUS) {
     if (!Object.prototype.hasOwnProperty.call(CONFIG.MENUS, name)) continue;
-    var p = CONFIG.MENUS[name];
-    if (!byPrice[p]) { byPrice[p] = []; prices.push(p); }
-    byPrice[p].push(name);
+    lines.push("・" + name + "\n　💴 " + Number(CONFIG.MENUS[name]).toLocaleString("ja-JP") + "円");
   }
-  prices.sort(function (a, b) { return a - b; });
-  return prices.map(function (p) {
-    return "💴 " + Number(p).toLocaleString("ja-JP") + "円\n" + byPrice[p].map(function (n) { return "・" + n; }).join("\n");
-  }).join("\n\n");
+  return lines.join("\n");
 }
 
 /** 料金表（CONFIG.MENUS から自動で作ります） */

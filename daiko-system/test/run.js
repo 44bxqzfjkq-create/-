@@ -184,8 +184,11 @@ const discordCalls = (env) => env.fetchLog.filter(c => c.url.indexOf("discord.te
     assert.strictEqual(fixed("1"), null); assert.strictEqual(fixed("メニュー"), null); assert.strictEqual(fixed("納期"), null);
   });
   test("設定済みの決まった返事は、そのまま返す（全角・大文字小文字の違いも吸収）", () => {
-    assert.ok(fixed("料金").indexOf("💴 300円\n・コイン指定（5万〜2億）\n・ツムレベルMAX 1体") >= 0, fixed("料金"));
-    assert.ok(fixed("料金").indexOf("💴 1,500円\n・プレミアムBOX完売") >= 0, "値段の安い順にまとまっていない");
+    const price = fixed("料金");
+    assert.ok(price.indexOf("・コイン指定（5万〜2億）\n　💴 300円") >= 0, price);
+    assert.ok(price.indexOf("・プレミアムBOX完売\n　💴 1,500円") >= 0, price);
+    assert.ok(price.indexOf("1つあたり") >= 0 && price.indexOf("300円＋300円＝600円") >= 0, "合計の考え方が書いていない");
+    Object.keys(env.run("CONFIG").MENUS).forEach(n => assert.ok(price.indexOf("・" + n + "\n") >= 0, "料金表にない: " + n));
     assert.ok(fixed("【このままメッセージどうぞ】").indexOf("どうぞ") >= 0);
     assert.ok(fixed(" 流れ ").indexOf("ご注文の流れ") >= 0);
     env.run('FIXED_REPLIES["1"] = "これは1番の返事です"; FIXED_REPLIES["ギフト"] = "ギフトの返事"');
@@ -197,7 +200,7 @@ const discordCalls = (env) => env.fetchLog.filter(c => c.url.indexOf("discord.te
     assert.ok(env.run("buildManual")().indexOf("【料金表】") >= 0);
     assert.ok(env.run("buildManual")().indexOf("コイン指定（5万〜2億）：300円") >= 0);
     const m = env.run("buildManual")();
-    ["1時間〜3日", "5分〜24時間", "キャンセルはできません", "こちらのミスがあった場合は、返金します", "BANされることは、ほぼありません"]
+    ["1時間〜3日", "5分〜24時間", "商品1つあたりの値段", "自動で完了になります", "キャンセルはできません", "こちらのミスがあった場合は、返金します", "BANされることは、ほぼありません"]
       .forEach(k => assert.ok(m.indexOf(k) >= 0, "マニュアルにない: " + k));
     assert.ok(/【よくある質問】\s*【未設定】/.test(m), "よくある質問は、まだ担当者に回す");
   });
@@ -384,6 +387,41 @@ const discordCalls = (env) => env.fetchLog.filter(c => c.url.indexOf("discord.te
     assert.ok(lastReply().indexOf("完了です") >= 0);
     assert.strictEqual(aiCalls(env).length, n, "ルールで察知できる場合はAIを使わない");
     assert.strictEqual(discordCalls(env).filter(c => c.method === "delete").length, before + 1);
+  });
+  test("「OK」と返事がなくても、納品から24時間で自動で完了になる", () => {
+    const o3 = submit({ contact: "e@f.com:pw33", requester: "三郎" });
+    handle("U3", o3.lineText);
+    env.run("adminSetStatus")("adminpw", o3.receiptNo, "代行中");
+    env.run("workerDeliver")("workerpw", o3.receiptNo);
+    const row = env.run("findOrderRow")(sheet(), o3.receiptNo);
+    const st = () => env.run("normStatus")(sheet().getRange(row, 10).getValue());
+    assert.ok(lineCalls(env, "push").pop().body.messages[0].text.indexOf("24時間後に") >= 0, "納品のお知らせに自動完了の説明がない");
+    env.run("remindUnhandled")();
+    assert.strictEqual(st(), "納品済", "24時間たつ前に完了にしてしまった");
+    sheet().getRange(row, 16).setValue(new Date(Date.now() - 25 * 3600000));
+    const del = discordCalls(env).filter(c => c.method === "delete").length;
+    env.run("remindUnhandled")();
+    assert.strictEqual(st(), "完了");
+    const p = lineCalls(env, "push").pop();
+    assert.strictEqual(p.body.to, "U3");
+    assert.ok(p.body.messages[0].text.indexOf("完了にしました") >= 0, p.body.messages[0].text);
+    assert.strictEqual(discordCalls(env).filter(c => c.method === "delete").length, del + 1, "Discordの通知が消えていない");
+  });
+  test("自動で完了にしない場合：担当者が対応中のお客さん／納品の時刻が記録されていない古い行", () => {
+    const o4 = submit({ contact: "g@h.com:pw44", requester: "四郎" });
+    handle("U4", o4.lineText);
+    env.run("adminSetStatus")("adminpw", o4.receiptNo, "代行中");
+    env.run("workerDeliver")("workerpw", o4.receiptNo);
+    const row = env.run("findOrderRow")(sheet(), o4.receiptNo);
+    env.run("upsertLineRecord")("U4", "", { status: "担当者待ち" });
+    sheet().getRange(row, 16).setValue(new Date(Date.now() - 48 * 3600000));
+    env.run("remindUnhandled")();
+    assert.strictEqual(env.run("normStatus")(sheet().getRange(row, 10).getValue()), "納品済", "担当者待ちなのに完了にした");
+    sheet().getRange(row, 16).setValue("");
+    env.run("upsertLineRecord")("U4", "", { status: "ボット対応" });
+    env.run("remindUnhandled")();
+    assert.strictEqual(env.run("normStatus")(sheet().getRange(row, 10).getValue()), "納品済", "時刻がないのに完了にした");
+    assert.notStrictEqual(sheet().getRange(row, 16).getValue(), "", "時刻を記録していない");
   });
 }
 
