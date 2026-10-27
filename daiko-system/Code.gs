@@ -304,7 +304,7 @@ function fixUrl(sheet, row) {
     "&t=" + encodeURIComponent(String(sheet.getRange(row, TOKEN_COL).getValue()));
 }
 function refillMessage(receiptNo, url) {
-  return "🔑 受付番号 " + receiptNo + "\n\nご入力のアカウントで\nログインできませんでした🙏\n\n" +
+  return "🔑 受付番号\n" + receiptNo + "\n\nご入力のアカウントで\nログインできませんでした🙏\n\n" +
     "👇 お手数ですが\n下のリンクから\n入力し直してください\n" + url +
     "\n\n⚠️ IDやパスワードは\nトークには送らないでください\n\n✅ 入力が終わると\n自動で代行を再開します";
 }

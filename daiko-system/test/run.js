@@ -216,6 +216,10 @@ const discordCalls = (env) => env.fetchLog.filter(c => c.url.indexOf("discord.te
     const long2 = "料金やご注文の流れについてのご質問も、お気軽にどうぞ。";
     wrap(long2).split("\n").forEach(l => assert.ok(w(l) <= 15, "長すぎる行: " + l));
     assert.ok(wrap("すごいですね、ありがとうございます").indexOf("す\nごい") < 0, "言葉の途中で切っている");
+    const nums = wrap("プレイヤーレベルMAXは200円でスコアカンストも200円です");
+    nums.split("\n").forEach(l => assert.ok(w(l) <= 15, "長すぎる行: " + l));
+    assert.ok(!/[0-9]\n[0-9]/.test(nums) && !/[0-9]\n円/.test(nums), "数字の途中で切っている: " + nums);
+    assert.ok(nums.indexOf("200円") >= 0);
     assert.strictEqual(wrap("短い文です😊"), "短い文です😊");
     assert.strictEqual(wrap("https://script.google.com/macros/s/AAAAAAAAAAAAAAAAAAAAAAAAAAA/exec"), "https://script.google.com/macros/s/AAAAAAAAAAAAAAAAAAAAAAAAAAA/exec", "URLは切らない");
     assert.strictEqual(w("1️⃣ フォーム"), 2 + 0.5 + 4);

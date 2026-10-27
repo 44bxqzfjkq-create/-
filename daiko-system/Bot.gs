@@ -77,14 +77,18 @@ function wrapForPhone(text, max) {
     for (var i = 0; i < cs.length; i++) {
       cur.push(cs[i]);
       if (displayWidth(cur.join("")) <= max) continue;
-      // いまの行の中で、いちばん後ろの区切り（句読点・「を」のあと、「 の前、「や」「の」などのあとの「お」「ご」の前）
+      // いまの行の中で、いちばん後ろの区切り
+      //  ・句読点、「を」「円」のあと
+      //  ・「 の前、数字のかたまりの前（「200円」が「20」と「0円」に分かれないように）
+      //  ・「や」「の」などのあとの「お」「ご」の前
       var cut = -1;
       for (var j = cur.length - 1; j > 0; j--) {
-        if (PUNCT.test(cur[j]) || cur[j] === "を") { cut = j + 1; break; }
-        if (j < cur.length - 1 && (cur[j] === "「" || (/[おご]/.test(cur[j]) && /[やをのにはがともへで]/.test(cur[j - 1])))) { cut = j; break; }
+        if (j < cur.length - 1 && (PUNCT.test(cur[j]) || cur[j] === "を" || cur[j] === "円")) { cut = j + 1; break; }
+        if (cur[j] === "「" || (/[0-9]/.test(cur[j]) && !/[0-9,.]/.test(cur[j - 1])) ||
+            (/[おご]/.test(cur[j]) && /[やをのにはがともへで]/.test(cur[j - 1]))) { cut = j; break; }
       }
-      if (cut < 0) continue; // 区切りがなければ、そのまま（LINEの自動の折り返しにまかせる）
-      if (cut >= cur.length) cut = cur.length; // 句読点が行末からはみ出す1文字なら、その行に残す
+      if (cut < 0 && PUNCT.test(cur[cur.length - 1])) cut = cur.length; // 句読点が行末からはみ出す1文字なら、その行に残す
+      if (cut <= 0) continue; // 区切りがなければ、そのまま（LINEの自動の折り返しにまかせる）
       out.push(cur.slice(0, cut).join(""));
       cur = cur.slice(cut);
       while (cur.length && cur[0] === " ") cur.shift();
@@ -504,7 +508,7 @@ function handleLink(userId, replyToken, name, link) {
 
   if (!link.code) { // 番号だけ：すでに本人と結びついている場合だけ状況を返す
     if (linked && linked === userId) {
-      lineReply(replyToken, "📋 受付番号 " + link.receiptNo + "\n" + statusMessage(normStatus(sheet.getRange(row, col("ステータス")).getValue())));
+      lineReply(replyToken, "📋 受付番号\n" + link.receiptNo + "\n" + statusMessage(normStatus(sheet.getRange(row, col("ステータス")).getValue())));
     } else {
       lineReply(replyToken, "🔑 確認コードが必要です。\n\n注文フォームの完了画面の\n「LINEで受付を完了する」\nボタンから送ってください🙏");
     }
@@ -522,14 +526,14 @@ function handleLink(userId, replyToken, name, link) {
   lockRun(function () { sheet.getRange(row, LINE_COL).setValue(userId); });
   var menu = String(sheet.getRange(row, col("希望メニュー")).getValue());
   upsertLineRecord(userId, name, { receiptNo: link.receiptNo, summary: clip("注文：" + menu, 120), status: "ボット対応" });
-  lineReply(replyToken, "✅ 受付を確認しました！\n📋 受付番号 " + link.receiptNo + "\n\nご注文ありがとう\nございます🙏\n\n🎮 順番に代行を進めます\n📊 進み具合は「進捗」と\n送ると確認できます\n📦 納品したらLINEで\nお知らせします");
+  lineReply(replyToken, "✅ 受付を確認しました！\n📋 受付番号\n" + link.receiptNo + "\n\nご注文ありがとう\nございます🙏\n\n🎮 順番に代行を進めます\n📊 進み具合は「進捗」と\n送ると確認できます\n📦 納品したらLINEで\nお知らせします");
 }
 
 function handleProgress(userId, replyToken, name, orders) {
   if (!orders.length) { lineReply(replyToken, BOT.NO_LINK_REPLY); return; }
   var sheet = ordersSheet();
   var lines = orders.slice(-3).reverse().map(function (o) {
-    return "📋 受付番号 " + o.receiptNo + "\n" + statusMessage(o.status) +
+    return "📋 受付番号\n" + o.receiptNo + "\n" + statusMessage(o.status) +
       (o.status === "再入力待ち" ? "\n\n👇 入力し直しはこちら\n" + fixUrl(sheet, o.row) : "");
   });
   lineReply(replyToken, lines.join("\n\n"));
