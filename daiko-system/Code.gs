@@ -336,7 +336,7 @@ function applyStatusEffects(sheet, row, status, opts) {
   if (status === "完了") {
     deleteDiscordMessage(sheet, row);
     if (userId) {
-      if (opts.notifyCustomer !== false) linePush(userId, "🙏 ご利用ありがとう\nございました！\n\nまたのご利用を\nお待ちしております😊");
+      if (opts.notifyCustomer !== false) linePush(userId, "🙏 ご利用ありがとう\nございました！" + thanksPromo());
       markLineRecordDone(userId);
     }
   }
@@ -612,7 +612,7 @@ function autoCompleteDelivered(sheet) {
     if (userId && getLineRecord(userId).status === "担当者待ち") continue; // 問題が起きているかもしれないので、残す
     setOrderStatus(sheet, row, "完了", { notifyCustomer: false });
     if (userId) {
-      linePush(userId, "✅ 受付番号\n" + v[i][col("受付番号") - 1] + "\n\n納品から" + CONFIG.AUTO_COMPLETE_HOURS + "時間たったので\n完了にしました。\nご利用ありがとう\nございました🙏\n\n💬 気になる点があれば\nいつでもご連絡ください");
+      linePush(userId, "✅ 受付番号\n" + v[i][col("受付番号") - 1] + "\n\n納品から" + CONFIG.AUTO_COMPLETE_HOURS + "時間たったので\n完了にしました。\nご利用ありがとう\nございました🙏\n\n💬 気になる点があれば\nいつでもご連絡ください" + thanksPromo());
     }
   }
 }

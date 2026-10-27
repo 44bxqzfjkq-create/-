@@ -411,6 +411,7 @@ const discordCalls = (env) => env.fetchLog.filter(c => c.url.indexOf("discord.te
     handle("U1", "ありがとうございました！");
     assert.strictEqual(env.run("normStatus")(sheet().getRange(2, 10).getValue()), "完了");
     assert.ok(lastReply().indexOf("完了です") >= 0);
+    assert.ok(lastReply().indexOf("おすすめ") >= 0 && lastReply().indexOf("https://line.me/R/ti/p/%40abc123") >= 0, "お礼・紹介のお願い・友だち追加リンクがない: " + lastReply());
     assert.strictEqual(aiCalls(env).length, n, "ルールで察知できる場合はAIを使わない");
     assert.strictEqual(discordCalls(env).filter(c => c.method === "delete").length, before + 1);
   });
@@ -431,6 +432,7 @@ const discordCalls = (env) => env.fetchLog.filter(c => c.url.indexOf("discord.te
     const p = lineCalls(env, "push").pop();
     assert.strictEqual(p.body.to, "U3");
     assert.ok(p.body.messages[0].text.indexOf("完了にしました") >= 0, p.body.messages[0].text);
+    assert.ok(p.body.messages[0].text.indexOf("おすすめ") >= 0, "自動完了にも紹介のお願いがない");
     assert.strictEqual(discordCalls(env).filter(c => c.method === "delete").length, del + 1, "Discordの通知が消えていない");
   });
   test("自動で完了にしない場合：担当者が対応中のお客さん／納品の時刻が記録されていない古い行", () => {

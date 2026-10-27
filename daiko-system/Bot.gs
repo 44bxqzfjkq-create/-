@@ -24,7 +24,7 @@ var BOT = {
   CRED_REPLY: "⚠️ IDやパスワードは\nLINEに送らないでください🙏\n\n📝 必要な情報は\n注文フォームから\nお送りください。\n\n↩️ 送ってしまった場合は\nそのメッセージを\n送信取消してください。",
   NON_TEXT_REPLY: "📩 ありがとうございます！\n担当者が確認しますね😊",
   NO_LINK_REPLY: "🔗 まだご注文とLINEが\nつながっていません。\n\n注文フォームの完了画面の\n「LINEで受付を完了する」\nボタンから送ってください🙏",
-  DONE_REPLY: "🎉 確認できました！\nありがとうございます🙌\n\n✅ これで完了です！\nまたのご利用を\nお待ちしております😊",
+  DONE_REPLY: "🎉 確認できました！\nありがとうございます🙌\n\n✅ これで完了です！",
   THANKS_REPLY: "😊 こちらこそ\nありがとうございます！\n\n気になることがあれば\nお気軽にどうぞ💬",
   HOLD_REPLY: "⏳ 担当者が確認中です。\n順番にご連絡しますので\nもう少しお待ちください🙏",
   BUSY_REPLY: "🙇 ただいま問い合わせが\n混み合っています。\n\n少し時間をおいて\nもう一度お送りください🙏",
@@ -99,6 +99,17 @@ function wrapForPhone(text, max) {
     if (cur.length) out.push(cur.join(""));
     return out.join("\n");
   }).join("\n");
+}
+
+/**
+ * 代行が終わったときに付ける「また使ってね・お友だちにおすすめしてね」の文章
+ * （公式LINEの友だち追加リンク付き。そのまま友だちに転送できます）
+ */
+function thanksPromo() {
+  var id = String(prop("LINE_BASIC_ID") || "").trim();
+  if (id && id.charAt(0) !== "@") id = "@" + id;
+  return "\n\n🎮 また困ったときは\nいつでもご依頼ください\n\n👫 お友だちにも\nおすすめしてもらえると\nとてもうれしいです😊" +
+    (id ? "\n\n👇 シェア用のリンクです\nhttps://line.me/R/ti/p/" + encodeURIComponent(id) : "");
 }
 
 /** Discordで@everyoneなどが動かないようにする */
@@ -571,7 +582,7 @@ function handleProgress(userId, replyToken, name, orders) {
 function completeByCustomer(userId, replyToken, name, text, delivered) {
   var sheet = ordersSheet();
   delivered.forEach(function (o) { setOrderStatus(sheet, o.row, "完了", { notifyCustomer: false }); });
-  lineReply(replyToken, BOT.DONE_REPLY);
+  lineReply(replyToken, BOT.DONE_REPLY + thanksPromo());
   addHistory(userId, text, BOT.DONE_REPLY);
   upsertLineRecord(userId, name, {});
 }
@@ -598,7 +609,8 @@ function answerWithAi(userId, replyToken, name, text, rec, orders, delivered) {
     var sheet = ordersSheet();
     delivered.forEach(function (o) { setOrderStatus(sheet, o.row, "完了", { notifyCustomer: false }); });
   }
-  lineReply(replyToken, reply);
+  var sentReply = done ? reply + thanksPromo() : reply;
+  lineReply(replyToken, sentReply);
   addHistory(userId, text, reply);
 
   var status = ai.needStaff ? "担当者待ち" : (done ? "完了" : "ボット対応");
