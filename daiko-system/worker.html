@@ -18,7 +18,13 @@
   .f{margin:8px 0;word-break:break-all;} .f b{display:block;font-size:12px;color:var(--sub);}
   .hint{font-size:13px;color:var(--sub);}
   .fixed{display:inline-block;font-size:12px;background:#fff0c2;border-radius:6px;padding:2px 8px;margin-left:6px;}
-  button.ng{background:#8a94a0;margin-left:8px;}
+  button.ng{background:#8a94a0;}
+  button.start{background:#2b6cb0;width:100%;margin-bottom:8px;}
+  .btns{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;}
+  .started{font-size:13px;color:#2b6cb0;font-weight:700;margin:6px 0;}
+  .code{display:flex;gap:6px;margin-top:8px;}
+  .code input{flex:1;padding:10px;border:1px solid var(--line);border-radius:8px;font-size:16px;}
+  .code button{background:#d99a00;}
 </style>
 </head>
 <body>
@@ -31,8 +37,12 @@
   </div>
 
   <div id="main" style="display:none">
-    <div class="hint">代行する依頼の一覧です。代行と納品が終わったら「納品完了」を押してください（お客さんにLINEでお知らせが届きます）。<br>
-      メールアドレスやパスワードが違ってログインできないときは「ログインできない」を押してください。お客さんに入力し直しのお願いが自動で届き、入力されるとこの一覧に戻ってきます。</div>
+    <div class="hint">
+      ① 作業を始めるときに「代行を始める」を押す（お客さんに「終わるまでログインしないで」と届きます）<br>
+      ② LINEのログインで確認番号が出たら、番号を入れて「確認番号を送る」（お客さんのLINEに届きます）<br>
+      ③ 終わったら「納品完了」<br>
+      メールアドレスやパスワードが違うときは「ログインできない」（お客さんに入力し直しのお願いが届き、入力されると一覧に戻ってきます）
+    </div>
     <div id="list"></div>
   </div>
 </div>
@@ -59,13 +69,23 @@
         '<div class="f"><b>内容</b>' + esc(o.menu) + '</div>' +
         '<div class="f"><b>代行するアカウント</b>' + esc(o.account) + '</div>' +
         '<div class="f"><b>備考</b>' + esc(o.note || "なし") + '</div>' +
-        '<button data-no="' + esc(o.no) + '">納品完了</button><button class="ng" data-ng="' + esc(o.no) + '">ログインできない</button></div>';
+        (o.started
+          ? '<div class="started">▶ 代行中（お客さんに知らせ済み）</div>' +
+            '<div class="code"><input type="tel" inputmode="numeric" placeholder="確認番号（数字）" data-codein="' + esc(o.no) + '"><button data-code="' + esc(o.no) + '">確認番号を送る</button></div>'
+          : '<button class="start" data-start="' + esc(o.no) + '">▶ 代行を始める</button>') +
+        '<div class="btns"><button data-no="' + esc(o.no) + '">納品完了</button><button class="ng" data-ng="' + esc(o.no) + '">ログインできない</button></div></div>';
     }).join("") || '<div class="card hint">いま代行する依頼はありません。</div>';
     Array.prototype.forEach.call($("list").querySelectorAll("button[data-no]"), function(b){
       b.addEventListener("click", function(){ deliver(b); });
     });
     Array.prototype.forEach.call($("list").querySelectorAll("button[data-ng]"), function(b){
       b.addEventListener("click", function(){ loginFail(b); });
+    });
+    Array.prototype.forEach.call($("list").querySelectorAll("button[data-start]"), function(b){
+      b.addEventListener("click", function(){ startWork(b); });
+    });
+    Array.prototype.forEach.call($("list").querySelectorAll("button[data-code]"), function(b){
+      b.addEventListener("click", function(){ sendCode(b); });
     });
   }
 
@@ -76,6 +96,28 @@
     google.script.run.withSuccessHandler(function(r){
       if (r && r.ok) { reload(); } else { alert("変更できませんでした（すでに変更済みかもしれません）"); reload(); }
     }).withFailureHandler(function(e){ btn.disabled = false; alert("エラー: " + (e && e.message ? e.message : e)); }).workerDeliver(KEY, no);
+  }
+
+  function startWork(btn){
+    var no = btn.getAttribute("data-start");
+    btn.disabled = true;
+    google.script.run.withSuccessHandler(function(r){
+      if (r && r.ok) { if (!r.line) alert("お客さんがLINE未連携のため、お知らせは届いていません（管理者に連絡済み）"); reload(); }
+      else { alert("始められませんでした（すでに変更済みかもしれません）"); reload(); }
+    }).withFailureHandler(function(e){ btn.disabled = false; alert("エラー: " + (e && e.message ? e.message : e)); }).workerStart(KEY, no);
+  }
+
+  function sendCode(btn){
+    var no = btn.getAttribute("data-code");
+    var input = document.querySelector('input[data-codein="' + no + '"]');
+    var code = input ? input.value.trim() : "";
+    if (!code) return;
+    btn.disabled = true;
+    google.script.run.withSuccessHandler(function(r){
+      btn.disabled = false;
+      if (r && r.ok) { input.value = ""; alert("お客さんに確認番号を送りました。"); }
+      else { alert("送れませんでした：" + ((r && r.reason) || "")); }
+    }).withFailureHandler(function(e){ btn.disabled = false; alert("エラー: " + (e && e.message ? e.message : e)); }).workerSendCode(KEY, no, code);
   }
 
   function loginFail(btn){
@@ -91,7 +133,12 @@
   function reload(){
     google.script.run.withSuccessHandler(function(r){ if (r && r.ok) render(r.list); }).workerList(KEY);
   }
-  setInterval(function(){ if ($("main").style.display !== "none") reload(); }, 20000);
+  setInterval(function(){
+    if ($("main").style.display === "none") return;
+    // 確認番号を入力している途中は、画面を作り直さない（入力が消えないように）
+    var typing = Array.prototype.some.call(document.querySelectorAll("input[data-codein]"), function(i){ return i.value || i === document.activeElement; });
+    if (!typing) reload();
+  }, 20000);
 </script>
 </body>
 </html>

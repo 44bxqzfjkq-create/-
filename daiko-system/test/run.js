@@ -305,8 +305,32 @@ const discordCalls = (env) => env.fetchLog.filter(c => c.url.indexOf("discord.te
     assert.strictEqual(env.run("adminSetStatus")("adminpw", order.receiptNo, "代行中").ok, true);
     const w = env.run("workerList")("workerpw");
     assert.strictEqual(w.list.length, 1);
-    assert.deepStrictEqual(Object.keys(w.list[0]).sort(), ["account", "fixed", "menu", "no", "note"]);
+    assert.deepStrictEqual(Object.keys(w.list[0]).sort(), ["account", "fixed", "menu", "no", "note", "started"]);
     assert.ok(JSON.stringify(w).indexOf("花子") < 0 && JSON.stringify(w).indexOf("drive.example") < 0);
+  });
+  test("代行者が「代行を始める」→ お客さんに「終わるまでログインしないで」と届く（1回だけ）", () => {
+    handle("U1", "進捗");
+    assert.ok(lastReply().indexOf("順番待ち") >= 0, "始める前は順番待ちと答える: " + lastReply());
+    assert.strictEqual(env.run("workerStart")("adminpw", order.receiptNo).ok, false, "代行者のパスワードが必要");
+    const n = lineCalls(env, "push").length;
+    assert.strictEqual(env.run("workerStart")("workerpw", order.receiptNo).ok, true);
+    const p = lineCalls(env, "push")[n];
+    assert.strictEqual(p.body.to, "U1");
+    assert.ok(p.body.messages[0].text.indexOf("ログインしないでください") >= 0, p.body.messages[0].text);
+    env.run("workerStart")("workerpw", order.receiptNo);
+    assert.strictEqual(lineCalls(env, "push").length, n + 1, "2回押しても、お知らせは1回だけ");
+    assert.strictEqual(env.run("workerList")("workerpw").list[0].started, true);
+    handle("U1", "進捗");
+    assert.ok(lastReply().indexOf("代行中") >= 0 && lastReply().indexOf("ログインしないで") >= 0, lastReply());
+  });
+  test("代行者が確認番号を送る → お客さんに届く（数字以外・代行中以外は送らない）", () => {
+    assert.strictEqual(env.run("workerSendCode")("workerpw", order.receiptNo, "abc").ok, false);
+    assert.strictEqual(env.run("workerSendCode")("workerpw", order.receiptNo, "12").ok, false);
+    assert.strictEqual(env.run("workerSendCode")("adminpw", order.receiptNo, "1234").ok, false);
+    const n = lineCalls(env, "push").length;
+    assert.strictEqual(env.run("workerSendCode")("workerpw", order.receiptNo, "１２３４").ok, true, "全角の数字も受け付ける");
+    const t = lineCalls(env, "push")[n].body.messages[0].text;
+    assert.ok(t.indexOf("1234") >= 0 && t.indexOf("確認番号") >= 0, t);
   });
   const TK = "abcdef1234567890abcdef1234567890";
   const status = () => env.run("normStatus")(sheet().getRange(2, 10).getValue());
@@ -347,6 +371,7 @@ const discordCalls = (env) => env.fetchLog.filter(c => c.url.indexOf("discord.te
     assert.strictEqual(sheet().getRange(2, 7).getValue(), "a@b.com:RightPW77");
     const w = env.run("workerList")("workerpw").list;
     assert.strictEqual(w.length, 1); assert.strictEqual(w[0].fixed, true); assert.strictEqual(w[0].account, "a@b.com:RightPW77");
+    assert.strictEqual(w[0].started, false, "入力し直しのあとは、もう一度「代行を始める」から（お客さんに知らせ直す）");
     const note = discordCalls(env).slice(d).map(c => JSON.stringify(c.body)).join("");
     assert.ok(note.indexOf("入力し直されました") >= 0 && note.indexOf("RightPW77") < 0, "Discordにパスワードが載っている／通知がない");
     assert.strictEqual(env.run("fixSubmit")(order.receiptNo, TK, "x@y.com:again1").ok, false, "終わったリンクは使えない");

@@ -170,7 +170,7 @@ function matchFixedReply(text) {
 function statusMessage(status) {
   switch (status) {
     case "未対応": return "📥 受付済みです！\n順番に対応しますので\n少しお待ちください😊";
-    case "代行中": return "🎮 ただいま代行中です！\nもう少しお待ちください💪";
+    case "代行中": return "🎮 ただいま代行中です！\n⚠️ 終わるまで\nログインしないでください🙏";
     case "再入力待ち": return "🔑 ご入力のアカウントで\nログインできなかったため\n入力し直しを\nお願いしています🙏";
     case "納品済": return "🎁 納品が完了しています！\nご確認のうえ\n「OK」「ありがとう」と\n送ってください😊";
     case "完了": return "✅ 完了しています。\nご利用ありがとう\nございました🙏";
@@ -533,7 +533,10 @@ function handleProgress(userId, replyToken, name, orders) {
   if (!orders.length) { lineReply(replyToken, BOT.NO_LINK_REPLY); return; }
   var sheet = ordersSheet();
   var lines = orders.slice(-3).reverse().map(function (o) {
-    return "📋 受付番号\n" + o.receiptNo + "\n" + statusMessage(o.status) +
+    var msg = (o.status === "代行中" && !o.started)
+      ? "📥 順番待ちです！\n順番が来たら\nLINEでお知らせします😊"
+      : statusMessage(o.status);
+    return "📋 受付番号\n" + o.receiptNo + "\n" + msg +
       (o.status === "再入力待ち" ? "\n\n👇 入力し直しはこちら\n" + fixUrl(sheet, o.row) : "");
   });
   lineReply(replyToken, lines.join("\n\n"));

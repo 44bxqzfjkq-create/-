@@ -43,6 +43,7 @@ var REMIND_COL = CONFIG.HEADER.length + 3; // リマインド済みの印
 var LINE_COL = CONFIG.HEADER.length + 4;   // お客さんのLINE（連携後に入る）
 var FIX_COL = CONFIG.HEADER.length + 5;    // お客さんがアカウントを入力し直した回数
 var DELIVERED_COL = CONFIG.HEADER.length + 6; // 納品済にした日時（自動で完了にするため）
+var STARTED_COL = CONFIG.HEADER.length + 7;   // 代行者が「代行を始める」を押した日時
 
 // ===== 小さな道具 =====
 function prop(name) {
@@ -267,6 +268,9 @@ function applyStatusEffects(sheet, row, status, opts) {
   var receiptNo = String(sheet.getRange(row, col("受付番号")).getValue());
   var userId = String(sheet.getRange(row, LINE_COL).getValue());
 
+  if (status === "未対応" || status === "再入力待ち") {
+    sheet.getRange(row, STARTED_COL).clearContent(); // 次に始めるとき、もう一度お客さんに知らせる
+  }
   if (status === "納品済") {
     sheet.getRange(row, DELIVERED_COL).setValue(new Date());
     var msg = "🎉 代行が完了して\n商品を納品しました！\n\n✅ 内容をご確認ください\n\n👍 問題なければ\n「OK」「ありがとう」と\n返信してください\n\n💬 気になる点があれば\nそのままご連絡ください\n\n⏰ ご返信がなくても\n" + CONFIG.AUTO_COMPLETE_HOURS + "時間後に\n自動で完了になります";
@@ -365,11 +369,12 @@ function ordersOfUser(sheet, userId) {
   var out = [];
   var last = sheet.getLastRow();
   if (last < 2 || !userId) return out;
-  var vals = sheet.getRange(2, 1, last - 1, LINE_COL).getValues();
+  var vals = sheet.getRange(2, 1, last - 1, STARTED_COL).getValues();
   for (var i = 0; i < vals.length; i++) {
     if (String(vals[i][LINE_COL - 1]) === userId) {
       out.push({ row: i + 2, receiptNo: String(vals[i][col("受付番号") - 1]),
-        status: normStatus(vals[i][col("ステータス") - 1]), menu: String(vals[i][col("希望メニュー") - 1]) });
+        status: normStatus(vals[i][col("ステータス") - 1]), menu: String(vals[i][col("希望メニュー") - 1]),
+        started: !!vals[i][STARTED_COL - 1] });
     }
   }
   return out; // 古い順
@@ -455,12 +460,12 @@ function workerList(key) {
   if (!isWorker(key)) return { ok: false };
   var sheet = ordersSheet(), out = [], last = sheet.getLastRow();
   if (last >= 2) {
-    var v = sheet.getRange(2, 1, last - 1, FIX_COL).getValues();
+    var v = sheet.getRange(2, 1, last - 1, STARTED_COL).getValues();
     for (var i = 0; i < v.length; i++) {
       if (normStatus(v[i][col("ステータス") - 1]) !== "代行中") continue;
       out.push({ no: String(v[i][col("受付番号") - 1]), menu: String(v[i][col("希望メニュー") - 1]),
         account: String(v[i][col("連絡先") - 1]), note: String(v[i][col("備考") - 1]),
-        fixed: (Number(v[i][FIX_COL - 1]) || 0) > 0 });
+        fixed: (Number(v[i][FIX_COL - 1]) || 0) > 0, started: !!v[i][STARTED_COL - 1] });
     }
   }
   return { ok: true, list: out };
@@ -474,6 +479,36 @@ function workerDeliver(key, receiptNo) {
   if (normStatus(sheet.getRange(row, col("ステータス")).getValue()) !== "代行中") return { ok: false };
   setOrderStatus(sheet, row, "納品済", {});
   return { ok: true };
+}
+
+/** 代行者：これから代行を始める → お客さんに「終わるまでログインしないで」と知らせる */
+function workerStart(key, receiptNo) {
+  if (!isWorker(key)) return { ok: false };
+  var sheet = ordersSheet();
+  var row = findOrderRow(sheet, String(receiptNo || "").trim());
+  if (!row) return { ok: false };
+  if (normStatus(sheet.getRange(row, col("ステータス")).getValue()) !== "代行中") return { ok: false };
+  if (sheet.getRange(row, STARTED_COL).getValue()) return { ok: true, line: true }; // 二重に知らせない
+  sheet.getRange(row, STARTED_COL).setValue(new Date());
+  var userId = String(sheet.getRange(row, LINE_COL).getValue());
+  var msg = "🎮 順番が来たので\n代行を始めます！\n\n⚠️ 終わるまでゲームに\nログインしないでください🙏\n\n⏱️ 10分ほどで終わります\n終わったらLINEで\nお知らせします\n\n🔢 ログインの確認番号を\nお送りすることがあります。\n届いたら入力をお願いします";
+  var sent = !!userId && linePush(userId, msg);
+  if (!sent) notifyAdmin("⚠️ " + receiptNo + " の代行を始めましたが、LINE未連携のため、お客さんに「ログインしないで」と伝えられていません。");
+  return { ok: true, line: sent };
+}
+
+/** 代行者：LINEのログインで出た確認番号を、お客さんに送る */
+function workerSendCode(key, receiptNo, code) {
+  if (!isWorker(key)) return { ok: false };
+  code = String(code || "").normalize("NFKC").replace(/\s/g, "");
+  if (!/^[0-9]{4,8}$/.test(code)) return { ok: false, reason: "番号は4〜8けたの数字で入力してください。" };
+  var sheet = ordersSheet();
+  var row = findOrderRow(sheet, String(receiptNo || "").trim());
+  if (!row || normStatus(sheet.getRange(row, col("ステータス")).getValue()) !== "代行中") return { ok: false, reason: "代行中の依頼ではありません。" };
+  var userId = String(sheet.getRange(row, LINE_COL).getValue());
+  if (!userId) return { ok: false, reason: "お客さんがLINE未連携です。管理者に連絡してください。" };
+  var msg = "🔢 ログインの確認番号です\n\n　　" + code + "\n\nスマホのLINEに出ている\n確認の画面に、この番号を\n入力してください🙏\n\n⏱️ 数分で無効になるので\nお早めにお願いします";
+  return linePush(userId, msg) ? { ok: true } : { ok: false, reason: "LINEへの送信に失敗しました。" };
 }
 
 /** 代行者：ログインできなかった → お客さんに入力し直しを頼む */
@@ -564,7 +599,8 @@ function setup() {
   sheet.getRange(1, LINE_COL).setValue("_lineUser");
   sheet.getRange(1, FIX_COL).setValue("_fix");
   sheet.getRange(1, DELIVERED_COL).setValue("_delivered");
-  sheet.hideColumns(MSG_ID_COL, 6);
+  sheet.getRange(1, STARTED_COL).setValue("_started");
+  sheet.hideColumns(MSG_ID_COL, 7);
   var rule = SpreadsheetApp.newDataValidation().requireValueInList(CONFIG.STATUSES, true).build();
   sheet.getRange(2, col("ステータス"), Math.max(sheet.getMaxRows() - 1, 1), 1).setDataValidation(rule);
 
