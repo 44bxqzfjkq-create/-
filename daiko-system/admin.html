@@ -113,7 +113,7 @@
           '<div><b>' + esc(q.name) + '</b>　<span class="hint">' + esc(q.time) + (q.receiptNo ? '　' + esc(q.receiptNo) : '') + '</span></div>' +
           '<div>' + esc(q.summary || "（要約なし）") + '</div>' +
           '<textarea class="qmsg" placeholder="お客さんへの返事（LINEで届きます）" style="height:56px;margin-top:6px"></textarea>' +
-          '<div class="btns"><button class="blue qsend">LINEで送る</button><button class="qdone">対応済にする</button><span class="hint qres"></span></div></div>';
+          '<div class="btns"><button class="blue qsend">LINEで送る</button><button class="qdone">対応済にする</button><button class="gray qignore">🚫 無視する</button><span class="hint qres"></span></div></div>';
       }).join("");
       Array.prototype.forEach.call($("inq").querySelectorAll(".card[data-uid]"), function(card){
         var uid = card.getAttribute("data-uid"), res = card.querySelector(".qres");
@@ -129,6 +129,10 @@
         card.querySelector(".qdone").addEventListener("click", function(){
           if (!confirm("このお客さんを「対応済」にして、ボットの返事を再開します。よろしいですか？")) return;
           google.script.run.withSuccessHandler(function(){ loadInquiries(); }).adminResolveInquiry(KEY, uid);
+        });
+        card.querySelector(".qignore").addEventListener("click", function(){
+          if (!confirm("嫌がらせなどのため、このお客さんにはボットが一切反応しないようにします。\n（解除は「LINE記録」シートのステータスを「ボット対応」に戻す）\nよろしいですか？")) return;
+          google.script.run.withSuccessHandler(function(){ loadInquiries(); }).adminIgnoreInquiry(KEY, uid);
         });
       });
     }).adminInquiries(KEY);

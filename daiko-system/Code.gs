@@ -33,7 +33,15 @@ var CONFIG = {
   REQUIRE_PHOTO: true,
   PRIORITY_KEYWORD: "依頼優先権",
   REMIND_MINUTES: 30,
-  AUTO_COMPLETE_HOURS: 24    // 納品済のまま返事がないとき、何時間で自動で完了にするか
+  AUTO_COMPLETE_HOURS: 24,   // 納品済のまま返事がないとき、何時間で自動で完了にするか
+  // いたずら・嫌がらせ対策
+  LIMITS: {
+    REQUESTER: 50, CONTACT: 300, NOTE: 500,   // 入力できる文字数
+    PHOTO_CHARS: 7000000,                      // 写真の大きさ（約5MB）
+    MAX_AMOUNT: 100000,                        // 金額の上限
+    ORDERS_PER_10MIN: 20,                      // 10分間に受け付ける注文の数（全体）
+    LOGIN_FAILS: 20                            // パスワード間違いが10分にこの回数を超えたら、10分ロック
+  }
 };
 
 // 見出しの右側にある「内部用の列」（自動で隠します）
@@ -80,8 +88,29 @@ function normStatus(s) {
 function isPriorityMenu(menuText) {
   return String(menuText || "").indexOf(CONFIG.PRIORITY_KEYWORD) >= 0;
 }
-function isAdmin(key) { var k = prop("ADMIN_KEY"); return !!k && String(key) === k; }
-function isWorker(key) { var k = prop("WORKER_KEY"); return !!k && String(key) === k; }
+function isAdmin(key) { return checkKey("ADMIN_KEY", key, "管理ページ"); }
+function isWorker(key) { return checkKey("WORKER_KEY", key, "代行者ページ"); }
+
+/**
+ * パスワードの確認。間違いが続いたら（総当たりで当てようとされたら）、しばらくロックして管理者に知らせる。
+ * ※ロック中は、正しいパスワードでも10分間入れません。
+ */
+function checkKey(propName, key, label) {
+  var k = prop(propName);
+  if (!k) return false;
+  var cache = CacheService.getScriptCache();
+  if (cache.get("lock_" + propName)) return false;
+  if (String(key) === k) return true;
+  var n = Number(cache.get("fail_" + propName) || 0) + 1;
+  cache.put("fail_" + propName, String(n), 600);
+  if (n >= CONFIG.LIMITS.LOGIN_FAILS) {
+    cache.put("lock_" + propName, "1", 600);
+    cache.remove("fail_" + propName);
+    notifyAdmin("🚨 " + label + "のパスワード間違いが続いたため、10分間ロックしました。心当たりがなければ、パスワードを変えてください。");
+  }
+  try { Utilities.sleep(500); } catch (e) {} // 総当たりを遅くする
+  return false;
+}
 
 /** LINEで「受付番号 ○○ コード ○○」と送ってもらうためのリンク */
 function buildLineUrl(basicId, text) {
@@ -138,15 +167,28 @@ function submitOrder(input) {
   if (!chosen.length) return { ok: false, message: "商品を1つ以上選んでください。" };
   if (!requester) return { ok: false, message: "ご依頼者（LINEの表示名）を入力してください。" };
   if (!account) return { ok: false, message: "代行するアカウントを入力してください。" };
-  if (!(amount >= 0) || isNaN(amount)) return { ok: false, message: "金額を正しく入力してください。" };
+  if (!(amount >= 0) || isNaN(amount) || amount > CONFIG.LIMITS.MAX_AMOUNT) return { ok: false, message: "金額を正しく入力してください。" };
+  if (requester.length > CONFIG.LIMITS.REQUESTER) return { ok: false, message: "ご依頼者の名前が長すぎます。" };
+  if (account.length > CONFIG.LIMITS.CONTACT) return { ok: false, message: "代行するアカウントの入力が長すぎます。" };
+  if (note.length > CONFIG.LIMITS.NOTE) return { ok: false, message: "備考は" + CONFIG.LIMITS.NOTE + "文字以内でお願いします。" };
 
   var hasImage = !!(input.image && input.image.dataUrl);
   if (CONFIG.REQUIRE_PHOTO && !hasImage) return { ok: false, message: "支払いの写真を添付してください。" };
+  if (hasImage && String(input.image.dataUrl).length > CONFIG.LIMITS.PHOTO_CHARS) return { ok: false, message: "写真が大きすぎます。スクリーンショットを添付してください。" };
 
   // 同じ内容の連続送信（押しすぎ）を60秒止める
   var cache = CacheService.getScriptCache();
   var sig = "sub_" + Utilities.base64EncodeWebSafe(account + "|" + amount + "|" + chosen.join(",")).slice(0, 200);
   if (cache.get(sig)) return { ok: false, message: "同じ内容が連続で送信されています。少し待ってからお試しください。" };
+  // いたずらで大量に送られたときの歯止め（全体で10分に20件まで）
+  var burst = Number(cache.get("orders_10m") || 0);
+  if (burst >= CONFIG.LIMITS.ORDERS_PER_10MIN) {
+    if (!cache.get("orders_10m_notified")) {
+      cache.put("orders_10m_notified", "1", 600);
+      notifyAdmin("🚨 10分間に注文が" + CONFIG.LIMITS.ORDERS_PER_10MIN + "件を超えたので、受付を一時的に止めています（いたずらの可能性）。本当の注文なら、Code.gs の ORDERS_PER_10MIN を増やしてください。");
+    }
+    return { ok: false, message: "ただいま注文が集中しています。少し時間をおいてお試しください。" };
+  }
 
   var result;
   try {
@@ -173,6 +215,7 @@ function submitOrder(input) {
     return { ok: false, message: "受付に失敗しました。もう一度お試しください。（" + (e && e.message ? e.message : e) + "）" };
   }
   cache.put(sig, "1", 60);
+  cache.put("orders_10m", String(burst + 1), 600);
 
   try { notifyDiscord(result.record, result.row); }
   catch (e) { Logger.log("Discord通知に失敗: " + e); }
@@ -238,7 +281,7 @@ function notifyDiscord(record, row) {
       { name: "依頼者(LINE名)", value: String(record["依頼者"] || "-"), inline: true },
       { name: "受付番号", value: String(record["受付番号"]), inline: true },
       { name: "希望メニュー", value: String(record["希望メニュー"]), inline: false },
-      { name: "金額", value: "¥" + Number(record["金額"]).toLocaleString("ja-JP"), inline: true },
+      { name: "金額", value: "¥" + Number(record["金額"]).toLocaleString("ja-JP") + amountWarning(record), inline: true },
       { name: "備考", value: String(record["備考"] || "（なし）").slice(0, 300), inline: false }
     ],
     footer: { text: "タイトルを押すと管理ページが開きます" }
@@ -248,6 +291,12 @@ function notifyDiscord(record, row) {
   if (res.getResponseCode() < 200 || res.getResponseCode() >= 300) return;
   var msgId = String((JSON.parse(res.getContentText()) || {}).id || "");
   if (msgId) ordersSheet().getRange(row, MSG_ID_COL).setValue(msgId);
+}
+
+/** 入力された金額が、選んだ商品の合計より少ないときの注意書き（ツムを複数頼んだときは多くなるのが正しい）*/
+function amountWarning(record) {
+  var sum = String(record["希望メニュー"] || "").split(", ").reduce(function (t, n) { return t + (Number(CONFIG.MENUS[n]) || 0); }, 0);
+  return Number(record["金額"]) < sum ? "\n⚠️ 商品の合計（¥" + sum.toLocaleString("ja-JP") + "）より少ないです" : "";
 }
 
 function deleteDiscordMessage(sheet, row) {
@@ -612,7 +661,9 @@ function setup() {
   ScriptApp.newTrigger("remindUnhandled").timeBased().everyMinutes(30).create();
   ScriptApp.newTrigger("dailySummary").timeBased().everyDays(1).atHour(9).inTimezone(CONFIG.TIMEZONE).create();
 
-  lineSheet(); // LINE記録シートも作る
+  var ls = lineSheet(); // LINE記録シートも作る
+  ls.getRange(2, 4, Math.max(ls.getMaxRows() - 1, 1), 1).setDataValidation(
+    SpreadsheetApp.newDataValidation().requireValueInList(LINE_STATUSES, true).build());
   Logger.log("セットアップ完了。次は checkSecrets を実行してください。");
 }
 

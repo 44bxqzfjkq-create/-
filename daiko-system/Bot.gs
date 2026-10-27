@@ -33,6 +33,9 @@ var BOT = {
   AI_LIMIT_ALL: 300         // 全体で、6時間にAIを使える回数（使いすぎ・いたずら対策）
 };
 
+/** 「LINE記録」シートのステータス（「無視」にすると、そのお客さんにはボットが一切反応しません）*/
+var LINE_STATUSES = ["ボット対応", "担当者待ち", "担当者対応済", "完了", "無視"];
+
 var BOT_DRY_RUN = false;            // true のとき、LINEには送らずログに出すだけ（テスト用）
 var BOT_STATE = { replied: false }; // 1つのメッセージに返事を2回しないための印
 
@@ -278,7 +281,7 @@ function lineSheet() {
       .setFontWeight("bold").setBackground("#f1f3f4");
     sh.setFrozenRows(1);
     sh.hideColumns(6);
-    var rule = SpreadsheetApp.newDataValidation().requireValueInList(["ボット対応", "担当者待ち", "担当者対応済", "完了"], true).build();
+    var rule = SpreadsheetApp.newDataValidation().requireValueInList(LINE_STATUSES, true).build();
     sh.getRange(2, 4, Math.max(sh.getMaxRows() - 1, 1), 1).setDataValidation(rule);
   }
   return sh;
@@ -418,8 +421,9 @@ function notifyStaff(name, orders, text, reason) {
 // ===================================================================
 function handleTextMessage(userId, replyToken, rawText) {
   var text = normalizeText(rawText);
-  var name = getDisplayName(userId);
   var rec = getLineRecord(userId);
+  if (rec.status === "無視") return; // 嫌がらせなどで「無視」にした人には、何もしない
+  var name = getDisplayName(userId);
   var sheet = ordersSheet();
   var orders = ordersOfUser(sheet, userId);
 
@@ -458,7 +462,7 @@ function handleTextMessage(userId, replyToken, rawText) {
     lineReply(replyToken, BOT.HOLD_REPLY);
     addHistory(userId, text, BOT.HOLD_REPLY);
     upsertLineRecord(userId, name, {});
-    notifyStaff(name, orders, text, "担当者待ちのお客さんから、続けてメッセージが届きました");
+    if (staffPingAllowed(userId)) notifyStaff(name, orders, text, "担当者待ちのお客さんから、続けてメッセージが届きました（10分に1回だけ知らせます）");
     return;
   }
   // 7. 納品前の「ありがとう」など：AIを使わず定型で返す
@@ -496,10 +500,30 @@ function aiAllowed(userId) {
   return true;
 }
 
+/** 同じお客さんについてのDiscordへの連絡は、10分に1回まで（連投でDiscordが埋まらないように）*/
+function staffPingAllowed(userId) {
+  var cache = CacheService.getScriptCache();
+  if (cache.get("ping_" + userId)) return false;
+  cache.put("ping_" + userId, "1", 600);
+  return true;
+}
+
+/** 受付番号・コードの間違いが続く人は、しばらく受け付けない（コードの総当たり対策）*/
+function linkLocked(userId) { return Number(CacheService.getScriptCache().get("linkfail_" + userId) || 0) >= 5; }
+function countLinkFail(userId) {
+  var cache = CacheService.getScriptCache();
+  cache.put("linkfail_" + userId, String(Number(cache.get("linkfail_" + userId) || 0) + 1), 3600);
+}
+
 function handleLink(userId, replyToken, name, link) {
+  if (linkLocked(userId)) {
+    lineReply(replyToken, "⚠️ 間違いが続いたため\nしばらく受け付けを\n止めています🙏\n\n1時間ほどたってから\nもう一度お試しください");
+    return;
+  }
   var sheet = ordersSheet();
   var row = findOrderRow(sheet, link.receiptNo);
   if (!row) {
+    countLinkFail(userId);
     lineReply(replyToken, "🔍 その受付番号が\n見つかりませんでした。\n\n番号をご確認のうえ\nもう一度お試しください🙏");
     return;
   }
@@ -515,6 +539,7 @@ function handleLink(userId, replyToken, name, link) {
     return;
   }
   if (!expected || link.code !== expected) {
+    countLinkFail(userId);
     lineReply(replyToken, "⚠️ 確認コードが\n合いませんでした。\n\n注文フォームの完了画面の\n「LINEで受付を完了する」\nボタンから\nもう一度送ってください🙏");
     return;
   }
@@ -607,6 +632,16 @@ function adminResolveInquiry(key, uid) {
   return { ok: true };
 }
 
+/** 嫌がらせなど：このお客さんには、ボットが一切反応しないようにする（LINE記録シートで「ボット対応」に戻せば解除）*/
+function adminIgnoreInquiry(key, uid) {
+  if (!isAdmin(key)) return { ok: false };
+  var sh = lineSheet();
+  var row = findLineRow(sh, String(uid || ""));
+  if (!row) return { ok: false };
+  sh.getRange(row, 4).setValue("無視");
+  return { ok: true };
+}
+
 function adminSendLineInquiry(key, uid, text) {
   if (!isAdmin(key)) return { ok: false };
   text = String(text || "").trim();
@@ -662,8 +697,10 @@ function handleEvent(ev) {
 
     if (isText) { handleTextMessage(userId, ev.replyToken, ev.message.text); return; }
     if (ev.message && ev.message.type === "sticker") return; // スタンプは何もしない
-    // 画像などは担当者へ
+    if (getLineRecord(userId).status === "無視") return;
+    // 画像などは担当者へ（Discordへの連絡は、同じ人について10分に1回まで）
     lineReply(ev.replyToken, BOT.NON_TEXT_REPLY);
+    if (!staffPingAllowed(userId)) return;
     var name = getDisplayName(userId);
     notifyStaff(name, ordersOfUser(ordersSheet(), userId), "（" + ((ev.message && ev.message.type) || "不明") + " が届きました）", "文字以外のメッセージです。LINE公式アカウントのチャットで確認してください");
   } catch (err) {

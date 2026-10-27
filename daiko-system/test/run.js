@@ -84,6 +84,7 @@ function makeEnv(props) {
     HtmlService: {}, ContentService: { createTextOutput: (t) => ({ text: t }) },
     Utilities: {
       getUuid: () => "abcdef12-3456-7890-abcd-ef1234567890",
+      sleep: () => {},
       base64EncodeWebSafe: (s) => Buffer.from(String(s)).toString("base64"),
       base64Decode: (s) => Array.from(Buffer.from(s, "base64")),
       newBlob: (bytes, type, name) => ({ bytes, type, name }),
@@ -561,6 +562,84 @@ const discordCalls = (env) => env.fetchLog.filter(c => c.url.indexOf("discord.te
     handle("U4", "@everyone 助けて");
     const last = discordCalls(env).filter(c => c.body && c.body.content).pop();
     assert.ok(last.body.content.indexOf("@everyone") < 0);
+  });
+}
+
+// ---------------- 4b. いたずら・嫌がらせ対策 ----------------
+{
+  const env = makeEnv(BASE_PROPS);
+  env.run("setup")();
+  const submit = (extra) => env.run("submitOrder")(Object.assign({ selected: ["BAN保証"], requester: "太郎", amount: 300, contact: "x@y.com:pw" + Math.random(), note: "", image: IMG }, extra || {}));
+  const handle = (uid, text) => { env.run("BOT_STATE").replied = false; env.run("handleTextMessage")(uid, "rt", text); };
+  const lastReply = () => { const c = lineCalls(env, "reply"); return c.length ? c[c.length - 1].body.messages[0].text : ""; };
+
+  test("フォーム：長すぎる入力・大きすぎる写真・ありえない金額は受け付けない", () => {
+    assert.strictEqual(submit({ requester: "あ".repeat(51) }).ok, false);
+    assert.strictEqual(submit({ contact: "a".repeat(301) }).ok, false);
+    assert.strictEqual(submit({ note: "あ".repeat(501) }).ok, false);
+    assert.strictEqual(submit({ amount: 1000000 }).ok, false);
+    assert.strictEqual(submit({ image: { dataUrl: "data:image/png;base64," + "A".repeat(7000001) } }).ok, false);
+  });
+  test("フォーム：金額が商品の合計より少ないと、Discordで目立たせる", () => {
+    const o = submit({ selected: ["プレミアムBOX完売"], amount: 100 });
+    assert.strictEqual(o.ok, true);
+    const d = discordCalls(env).filter(c => c.body && c.body.embeds).pop();
+    assert.ok(JSON.stringify(d.body).indexOf("合計（¥1,500）より少ない") >= 0, JSON.stringify(d.body));
+    const o2 = submit({ selected: ["ツムレベルMAX 1体"], amount: 900, note: "3体" });
+    const d2 = discordCalls(env).filter(c => c.body && c.body.embeds).pop();
+    assert.ok(JSON.stringify(d2.body).indexOf("より少ない") < 0, "多いのは正しい（複数体）");
+  });
+  test("フォーム：10分に20件を超える注文は、一時的に止めて管理者に知らせる", () => {
+    for (let i = 0; i < 25; i++) submit();
+    const r = submit();
+    assert.strictEqual(r.ok, false);
+    assert.ok(r.message.indexOf("集中") >= 0);
+    assert.strictEqual(discordCalls(env).filter(c => c.body && c.body.content && c.body.content.indexOf("注文が20件を超えた") >= 0).length, 1, "知らせは1回だけ");
+  });
+  test("管理ページ：パスワードの総当たりは、20回でロックして知らせる（ロック中は正しくても入れない）", () => {
+    assert.strictEqual(env.run("adminList")("adminpw").ok, true);
+    for (let i = 0; i < 20; i++) env.run("adminList")("guess" + i);
+    assert.strictEqual(env.run("adminList")("adminpw").ok, false, "ロックされていない");
+    assert.ok(discordCalls(env).some(c => c.body && c.body.content && c.body.content.indexOf("管理ページのパスワード間違い") >= 0));
+    assert.strictEqual(env.run("workerList")("workerpw").ok, true, "代行者ページは別にロックされる");
+    delete env.cacheStore["lock_ADMIN_KEY"];
+    assert.strictEqual(env.run("adminList")("adminpw").ok, true, "ロックが解けたら入れる");
+  });
+  test("LINE：受付番号・コードの間違いが5回続いたら、1時間受け付けない（総当たり対策）", () => {
+    delete env.cacheStore["orders_10m"]; // 上のテストで止まった受付を元に戻す
+    const o = submit({ contact: "link@test.com:pw" });
+    assert.strictEqual(o.ok, true);
+    for (let i = 0; i < 5; i++) handle("Ubad", "受付番号 " + o.receiptNo + " コード 00000" + i);
+    handle("Ubad", o.lineText);
+    assert.ok(lastReply().indexOf("止めています") >= 0, lastReply());
+    const row = env.run("findOrderRow")(env.sheets["受付"], o.receiptNo);
+    assert.strictEqual(String(env.sheets["受付"].getRange(row, 14).getValue()), "", "ロック中なのに結びついた");
+    handle("Ugood", o.lineText);
+    assert.ok(lastReply().indexOf("受付を確認しました") >= 0, "ほかの人には影響しない");
+  });
+  test("担当者待ちの人が連投しても、Discordへの連絡は10分に1回まで", () => {
+    env.run("upsertLineRecord")("Uspam", "", { status: "担当者待ち" });
+    const n = discordCalls(env).length;
+    for (let i = 0; i < 10; i++) handle("Uspam", "早くしろ" + i);
+    assert.strictEqual(discordCalls(env).length, n + 1);
+  });
+  test("画像の連投も、Discordへの連絡は10分に1回まで", () => {
+    const post = (id) => env.run("doPost")({ parameter: { key: "secretkey" }, postData: { contents: JSON.stringify({ events: [{ type: "message", replyToken: "r", webhookEventId: id, source: { type: "user", userId: "Uimg" }, message: { type: "image", id } }] }) } });
+    const n = discordCalls(env).length;
+    for (let i = 0; i < 5; i++) post("img" + i);
+    assert.strictEqual(discordCalls(env).length, n + 1);
+  });
+  test("「無視する」にした人には、ボットが一切反応しない（AIも通知も使わない）", () => {
+    env.run("upsertLineRecord")("Utroll", "", { status: "担当者待ち" });
+    assert.strictEqual(env.run("adminIgnoreInquiry")("bad", "Utroll").ok, false);
+    assert.strictEqual(env.run("adminIgnoreInquiry")("adminpw", "Utroll").ok, true);
+    const r = lineCalls(env, "reply").length, d = discordCalls(env).length, a = aiCalls(env).length;
+    handle("Utroll", "料金"); handle("Utroll", "ばか");
+    env.run("doPost")({ parameter: { key: "secretkey" }, postData: { contents: JSON.stringify({ events: [{ type: "message", replyToken: "r", webhookEventId: "tr1", source: { type: "user", userId: "Utroll" }, message: { type: "image", id: "tr1" } }] }) } });
+    assert.strictEqual(lineCalls(env, "reply").length, r);
+    assert.strictEqual(discordCalls(env).length, d);
+    assert.strictEqual(aiCalls(env).length, a);
+    assert.ok(!env.run("adminInquiries")("adminpw").list.some(q => q.uid === "Utroll"), "担当者待ちの一覧から消える");
   });
 }
 
