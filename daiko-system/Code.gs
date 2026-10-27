@@ -540,7 +540,7 @@ function workerStart(key, receiptNo) {
   if (sheet.getRange(row, STARTED_COL).getValue()) return { ok: true, line: true }; // 二重に知らせない
   sheet.getRange(row, STARTED_COL).setValue(new Date());
   var userId = String(sheet.getRange(row, LINE_COL).getValue());
-  var msg = "🎮 順番が来たので\n代行を始めます！\n\n⚠️ 終わるまでゲームに\nログインしないでください🙏\n\n⏱️ 10分ほどで終わります\n終わったらLINEで\nお知らせします\n\n🔢 ログインの確認番号を\nお送りすることがあります。\n届いたら入力をお願いします";
+  var msg = "🎮 順番が来たので\n代行を始めます！\n\n⚠️ 終わるまでゲームに\nログインしないでください🙏\n\n📩 作業が終わり次第\nご連絡いたします\n\n🔢 ログインの確認番号を\nお送りすることがあります。\n届いたら入力をお願いします";
   var sent = !!userId && linePush(userId, msg);
   if (!sent) notifyAdmin("⚠️ " + receiptNo + " の代行を始めましたが、LINE未連携のため、お客さんに「ログインしないで」と伝えられていません。");
   return { ok: true, line: sent };
