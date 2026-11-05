@@ -392,7 +392,7 @@ function buildSystemDynamic(rec, orders) {
   return "【このお客さんの情報】\nこれまでの要約：" + (rec.summary || "（まだありません）") + "\n注文の状況：" + st;
 }
 
-function callClaude(systemStatic, systemDynamic, messages) {
+function callClaude(systemStatic, systemDynamic, messages, maxTokens) {
   var key = prop("CLAUDE_API_KEY");
   if (!key) throw new Error("CLAUDE_API_KEY が未設定です");
   var res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
@@ -400,7 +400,7 @@ function callClaude(systemStatic, systemDynamic, messages) {
     headers: { "x-api-key": key, "anthropic-version": "2023-06-01" },
     payload: JSON.stringify({
       model: BOT.MODEL,
-      max_tokens: BOT.MAX_TOKENS,
+      max_tokens: maxTokens || BOT.MAX_TOKENS,
       system: [
         { type: "text", text: systemStatic, cache_control: { type: "ephemeral" } },
         { type: "text", text: systemDynamic }
@@ -422,6 +422,7 @@ function callClaude(systemStatic, systemDynamic, messages) {
 // ===================================================================
 function notifyStaff(name, orders, text, reason) {
   var no = orders && orders.length ? orders[orders.length - 1].receiptNo : "";
+  if (!BOT_DRY_RUN) logEscalation(name, text, reason); // AI店長の改善係が、週1で読み返す
   notifyAdmin((BOT_DRY_RUN ? "【テスト】" : "") + "🙋 担当者の対応が必要です\nお客さん: " + noMention(name) +
     (no ? "\n受付番号: " + no : "") + "\n理由: " + reason +
     "\nメッセージ: " + safeForLog(text) + "\n" + appUrl() + "?page=admin");

@@ -23,6 +23,7 @@ function makeEnv(props) {
   const aiQueue = [];            // Claudeの返事（先頭から使う）
   const cacheStore = {};
   const sheets = {};
+  const triggers = [];
 
   function colToIdx(c) { return c - 1; }
   function makeSheet(name) {
@@ -74,7 +75,8 @@ function makeEnv(props) {
       getService: () => ({ getUrl: () => "https://script.google.com/macros/s/TEST/exec" }),
       getProjectTriggers: () => [],
       deleteTrigger() {},
-      newTrigger: () => { const t = { forSpreadsheet() { return t; }, onEdit() { return t; }, timeBased() { return t; }, everyMinutes() { return t; }, everyDays() { return t; }, atHour() { return t; }, inTimezone() { return t; }, create() { return t; } }; return t; }
+      WeekDay: { MONDAY: "MONDAY" },
+      newTrigger: (fn) => { const t = { forSpreadsheet() { return t; }, onEdit() { return t; }, timeBased() { return t; }, everyMinutes() { return t; }, everyDays() { return t; }, onWeekDay() { return t; }, atHour() { return t; }, inTimezone() { return t; }, create() { triggers.push(fn); return t; } }; return t; }
     },
     DriveApp: {
       Access: { ANYONE_WITH_LINK: 1 }, Permission: { VIEW: 1 },
@@ -114,11 +116,11 @@ function makeEnv(props) {
     }
   };
   vm.createContext(ctx);
-  for (const f of ["Manual.gs", "FixedReplies.gs", "Code.gs", "Bot.gs"]) {
+  for (const f of ["Manual.gs", "FixedReplies.gs", "Code.gs", "Bot.gs", "AiStaff.gs"]) {
     vm.runInContext(fs.readFileSync(path.join(root, f), "utf8"), ctx, { filename: f });
   }
   const run = (code) => vm.runInContext(code, ctx);
-  return { ctx, run, logs, fetchLog, aiQueue, cacheStore, sheets, ss };
+  return { ctx, run, logs, fetchLog, aiQueue, cacheStore, sheets, ss, triggers };
 }
 
 const BASE_PROPS = {
@@ -482,7 +484,7 @@ const discordCalls = (env) => env.fetchLog.filter(c => c.url.indexOf("discord.te
     assert.strictEqual(calls[0].headers["x-api-key"], "KEY"); // キーは設定から読む
   });
   test("コードの中に、秘密の文字列が書かれていない", () => {
-    const src = ["Code.gs", "Bot.gs", "Manual.gs", "FixedReplies.gs", "form.html", "admin.html", "worker.html"]
+    const src = ["Code.gs", "Bot.gs", "Manual.gs", "FixedReplies.gs", "AiStaff.gs", "form.html", "admin.html", "worker.html", "fix.html"]
       .map(f => fs.readFileSync(path.join(root, f), "utf8")).join("\n");
     assert.ok(!/discord(app)?\.com\/api\/webhooks\/\d/.test(src), "Discord URLが書かれている");
     assert.ok(!/sk-ant-/.test(src), "APIキーが書かれている");
@@ -718,6 +720,79 @@ const discordCalls = (env) => env.fetchLog.filter(c => c.url.indexOf("discord.te
     assert.ok(log.indexOf("未設定 CLAUDE_API_KEY") >= 0 && log.indexOf("OK    LINE_TOKEN") >= 0);
     assert.ok(log.indexOf("未設定 LINE_BASIC_ID") >= 0, "LINE_BASIC_ID がないとボタンが出ないので必須");
     assert.ok(log.indexOf("SECRETVALUE") < 0);
+  });
+}
+
+// ---------------- 5b. AI店長の週1朝礼 ----------------
+{
+  const DAY = 86400000;
+  const mkEnv = () => { const env = makeEnv(BASE_PROPS); env.run("setup")(); return env; };
+  // 受付シートに、日時を指定して注文の行を入れる
+  const addRow = (env, o) => env.sheets["受付"].appendRow([o.t, "T-" + Math.random(), "客", o.menu, 1, o.amount, o.contact, "", "", o.status,
+    "", "tok", "", o.line || "", "", o.delivered || ""]);
+  const seed = (env) => {
+    const now = Date.now();
+    addRow(env, { t: new Date(now - 10 * DAY), menu: "BAN保証", amount: 300, contact: "a@x.com:pw", status: "完了", line: "U1" });
+    addRow(env, { t: new Date(now - 3 * DAY), menu: "プレイヤーレベルMAX", amount: 200, contact: "c@x.com:pw", status: "代行中", line: "U1" });
+    addRow(env, { t: new Date(now - 2 * DAY), menu: "コイン指定（5万〜2億）, BAN保証", amount: 500, contact: "A@x.com:pw2", status: "完了",
+      delivered: new Date(now - 2 * DAY + 3 * 3600000) });
+    addRow(env, { t: new Date(now - 1 * DAY), menu: "コイン指定（5万〜2億）", amount: 300, contact: "b@x.com:pw", status: "納品済", line: "U2",
+      delivered: new Date(now - 1 * DAY + 5 * 3600000) });
+  };
+
+  test("setup で、毎週月曜の朝礼が予約される", () => {
+    const env = mkEnv();
+    assert.ok(env.triggers.indexOf("weeklyMeeting") >= 0, JSON.stringify(env.triggers));
+    assert.ok(env.sheets["担当者行きログ"] && env.sheets["AI店長メモ"]);
+  });
+  test("分析の数字は、プログラムが正確に数える（AIは使わない）", () => {
+    const env = mkEnv(); seed(env);
+    const s = env.run("weeklyStats")(new Date());
+    assert.strictEqual(s.orders, 3); assert.strictEqual(s.revenue, 1000);
+    assert.strictEqual(s.prevOrders, 1); assert.strictEqual(s.prevRevenue, 300);
+    assert.strictEqual(s.repeatCustomers, 2, "同じゲームアカウント（大文字小文字ちがい）・同じLINEはリピート");
+    assert.strictEqual(s.newCustomers, 1); assert.strictEqual(s.repeatRate, 67);
+    assert.strictEqual(s.avgWaitHours, 4);
+    assert.strictEqual(s.topItems[0].name, "コイン指定（5万〜2億）"); assert.strictEqual(s.topItems[0].count, 2);
+    assert.strictEqual(s.pendingNow, 1);
+    assert.strictEqual(aiCalls(env).length, 0);
+  });
+  test("担当者行きは記録される（IDやパスワードらしきものは記録しない）", () => {
+    const env = mkEnv();
+    env.run("notifyStaff")("花子", [], "返金してほしいです", "テスト");
+    env.run("notifyStaff")("太郎", [], "パスワードは Secret123x です", "テスト");
+    const log = JSON.stringify(env.sheets["担当者行きログ"].data);
+    assert.ok(log.indexOf("返金してほしいです") >= 0);
+    assert.ok(log.indexOf("Secret123x") < 0, "パスワードが記録された");
+  });
+  test("朝礼：数字＋4人のAIスタッフの報告が、Discordに届いてシートにも残る", () => {
+    const env = mkEnv(); seed(env);
+    env.run("notifyStaff")("花子", [], "PayPay以外で払えますか", "マニュアルにない内容");
+    env.sheets["AI店長メモ"].getRange(2, 2).setValue("11/10 新ツム追加");
+    ["✅ 注文が増えた", "❓ よくある質問：支払い方法", "🐦 Xの投稿案", "📝 今週やること\n1. 支払い方法を足す"].forEach(t => env.aiQueue.push({ text: t }));
+    const d = discordCalls(env).length;
+    env.run("weeklyMeeting")();
+    const calls = aiCalls(env);
+    assert.strictEqual(calls.length, 4);
+    calls.forEach(c => { assert.strictEqual(c.body.max_tokens, 1500); assert.ok(c.body.system[0].text.indexOf("【マニュアル】") >= 0); });
+    assert.ok(calls[1].body.messages[0].content.indexOf("PayPay以外で払えますか") >= 0, "改善係に担当者行きの質問が渡っていない");
+    assert.ok(calls[2].body.messages[0].content.indexOf("11/10 新ツム追加") >= 0, "広報係にメモが渡っていない");
+    assert.ok(calls[3].body.messages[0].content.indexOf("🐦 Xの投稿案") >= 0, "店長にスタッフの報告が渡っていない");
+    const msgs = discordCalls(env).slice(d).map(c => c.body.content);
+    assert.strictEqual(msgs.length, 4);
+    assert.ok(msgs[0].indexOf("今週の朝礼") >= 0 && msgs[0].indexOf("注文：3件") >= 0 && msgs[0].indexOf("今週やること") >= 0, msgs[0]);
+    assert.ok(msgs[1].indexOf("分析係") >= 0 && msgs[2].indexOf("改善係") >= 0 && msgs[3].indexOf("広報係") >= 0);
+    assert.ok(JSON.stringify(env.sheets["AI朝礼"].data).indexOf("今週の朝礼") >= 0, "シートに残っていない");
+  });
+  test("朝礼：担当者行きがなければ、改善係はAIを使わない／AIが失敗しても数字は届く", () => {
+    const env = mkEnv(); seed(env);
+    env.aiQueue.push({ error: 500 }); env.aiQueue.push({ error: 500 }); env.aiQueue.push({ error: 500 });
+    const d = discordCalls(env).length;
+    env.run("weeklyMeeting")();
+    assert.strictEqual(aiCalls(env).length, 3, "改善係がAIを呼んだ");
+    const msgs = discordCalls(env).slice(d).map(c => c.body.content);
+    assert.ok(msgs[0].indexOf("注文：3件") >= 0 && msgs[0].indexOf("AIが作れませんでした") >= 0, msgs[0]);
+    assert.ok(msgs[2].indexOf("担当者行きになった質問はありませんでした") >= 0);
   });
 }
 

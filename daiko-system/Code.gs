@@ -655,11 +655,13 @@ function setup() {
 
   ScriptApp.getProjectTriggers().forEach(function (t) {
     var fn = t.getHandlerFunction();
-    if (fn === "onStatusEdit" || fn === "remindUnhandled" || fn === "dailySummary") ScriptApp.deleteTrigger(t);
+    if (fn === "onStatusEdit" || fn === "remindUnhandled" || fn === "dailySummary" || fn === "weeklyMeeting") ScriptApp.deleteTrigger(t);
   });
   ScriptApp.newTrigger("onStatusEdit").forSpreadsheet(ss).onEdit().create();
   ScriptApp.newTrigger("remindUnhandled").timeBased().everyMinutes(30).create();
   ScriptApp.newTrigger("dailySummary").timeBased().everyDays(1).atHour(9).inTimezone(CONFIG.TIMEZONE).create();
+  ScriptApp.newTrigger("weeklyMeeting").timeBased().onWeekDay(ScriptApp.WeekDay.MONDAY).atHour(9).inTimezone(CONFIG.TIMEZONE).create();
+  escalationSheet(); memoSheet(); // AI店長が使うシートも作る
 
   var ls = lineSheet(); // LINE記録シートも作る
   ls.getRange(2, 4, Math.max(ls.getMaxRows() - 1, 1), 1).setDataValidation(
