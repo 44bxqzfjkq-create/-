@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <base target="_top" />
+    <meta charset="utf-8" />
+    <style>
+      :root{--bg:#f5f6f8;--card:#fff;--line:#e3e6ea;--text:#1f2933;--sub:#66727f;--accent:#2f7d32;--accent-d:#266a29;--danger:#c0392b;}
+      *{box-sizing:border-box;}
+      body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;line-height:1.6;}
+      .wrap{max-width:480px;margin:0 auto;padding:16px 14px 40px;}
+      h1{font-size:20px;margin:8px 4px 12px;}
+      .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;}
+      .field{margin-bottom:16px;}
+      label{display:block;font-size:14px;font-weight:600;margin-bottom:6px;}
+      input[type=text]{width:100%;padding:12px;font-size:16px;border:1px solid var(--line);border-radius:8px;background:#fff;color:var(--text);}
+      .hint{font-size:12px;color:var(--sub);margin-top:6px;}
+      .info{background:#eef6ee;border-radius:8px;padding:10px 12px;font-size:14px;margin-bottom:16px;}
+      .tips{background:#fff8e1;border:1px solid #ffe0a3;border-radius:8px;padding:10px 12px;font-size:13px;margin-bottom:16px;}
+      .tips ul{margin:4px 0 0;padding-left:18px;}
+      button{width:100%;padding:14px;font-size:16px;font-weight:700;color:#fff;background:var(--accent);border:none;border-radius:10px;cursor:pointer;}
+      button:disabled{opacity:.6;cursor:default;}
+      .msg{margin-top:14px;font-size:14px;}
+      .msg.error{color:var(--danger);}
+      .done{text-align:center;padding:24px 12px;font-size:15px;}
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1>アカウントの再入力</h1>
+      <input type="hidden" id="no" value="<?= no ?>" />
+      <input type="hidden" id="tk" value="<?= tk ?>" />
+
+      <div class="card" id="loading">読み込み中です…</div>
+
+      <div class="card" id="formCard" style="display:none">
+        <div class="info">
+          受付番号：<b id="rNo"></b><br />
+          ご依頼：<span id="rMenu"></span>
+        </div>
+
+        <div class="tips">
+          ご入力いただいたアカウントでログインできませんでした。<br />
+          <span id="prevBox" style="display:none">前回のメールアドレス：<b id="prev"></b><br /></span>
+          よくある原因：
+          <ul>
+            <li>メールアドレスのつづり違い（gmail / gmai など）</li>
+            <li>パスワードの大文字・小文字の違い</li>
+            <li>前やうしろに、空白が入っている</li>
+            <li>LINEに登録していないメールアドレス</li>
+          </ul>
+        </div>
+
+        <div class="field">
+          <label for="contact">代行するアカウント</label>
+          <input id="contact" type="text" placeholder="LINEのメールアドレス:パスワード" autocomplete="off" autocapitalize="off" spellcheck="false" />
+          <div class="hint">最初のご注文と同じ形で入力してください。</div>
+        </div>
+
+        <button id="sendBtn" onclick="onSend()">送信する</button>
+        <div class="msg" id="msg"></div>
+      </div>
+
+      <div class="card done" id="doneCard" style="display:none">
+        入力し直していただき、ありがとうございます ✅<br />
+        代行を再開します。終わりましたら、LINEでお知らせします。<br />
+        <span class="hint">このページは閉じて大丈夫です。</span>
+      </div>
+
+      <div class="card" id="errCard" style="display:none"><span id="errText"></span></div>
+    </div>
+
+    <script>
+      var NO = document.getElementById("no").value, TK = document.getElementById("tk").value;
+      function $(id){ return document.getElementById(id); }
+      function showErr(t){ $("loading").style.display = "none"; $("formCard").style.display = "none"; $("errText").textContent = t; $("errCard").style.display = "block"; }
+
+      google.script.run.withSuccessHandler(function(r){
+        if (!r || !r.ok) { showErr((r && r.message) || "リンクが正しくありません。"); return; }
+        $("rNo").textContent = r.receiptNo; $("rMenu").textContent = r.menu;
+        if (r.hint) { $("prev").textContent = r.hint; $("prevBox").style.display = "inline"; }
+        $("loading").style.display = "none"; $("formCard").style.display = "block";
+      }).withFailureHandler(function(e){ showErr("通信エラー: " + (e && e.message ? e.message : e)); }).fixInfo(NO, TK);
+
+      function onSend(){
+        var v = $("contact").value.trim();
+        if (!v) { $("msg").className = "msg error"; $("msg").textContent = "メールアドレスとパスワードを入力してください。"; return; }
+        $("sendBtn").disabled = true; $("sendBtn").textContent = "送信中…";
+        google.script.run.withSuccessHandler(function(r){
+          if (r && r.ok) { $("formCard").style.display = "none"; $("doneCard").style.display = "block"; }
+          else { $("msg").className = "msg error"; $("msg").textContent = (r && r.message) || "送信できませんでした。"; $("sendBtn").disabled = false; $("sendBtn").textContent = "送信する"; }
+        }).withFailureHandler(function(e){
+          $("msg").className = "msg error"; $("msg").textContent = "通信エラー: " + (e && e.message ? e.message : e);
+          $("sendBtn").disabled = false; $("sendBtn").textContent = "送信する";
+        }).fixSubmit(NO, TK, v);
+      }
+    </script>
+  </body>
+</html>

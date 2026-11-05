@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<base target="_top">
+<meta charset="utf-8">
+<style>
+  :root{--bg:#f5f6f8;--card:#fff;--line:#e3e6ea;--text:#1f2933;--sub:#66727f;--accent:#2f7d32;}
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",sans-serif;background:var(--bg);color:var(--text);}
+  .wrap{max-width:900px;margin:0 auto;padding:12px;}
+  input,textarea,button{font-size:16px;font-family:inherit;}
+  input[type=password],textarea{width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;}
+  button{padding:10px 14px;border:none;border-radius:8px;background:var(--accent);color:#fff;font-weight:700;cursor:pointer;}
+  button.gray{background:#8a94a0;} button.amber{background:#d99a00;} button.blue{background:#2b6cb0;}
+  button:disabled{opacity:.5;}
+  .row{display:flex;gap:8px;align-items:center;}
+  .tiles{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0;}
+  .tile{flex:1;min-width:100px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px;text-align:center;}
+  .tile .l{font-size:11px;color:var(--sub);} .tile .v{font-size:19px;font-weight:800;color:#266a29;}
+  .tabs{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0;}
+  .tab{padding:6px 12px;border-radius:16px;background:#e8ecef;font-size:14px;cursor:pointer;}
+  .tab.on{background:var(--accent);color:#fff;}
+  .layout{display:flex;gap:12px;flex-wrap:wrap;}
+  .list{flex:1;min-width:250px;background:var(--card);border:1px solid var(--line);border-radius:10px;max-height:70vh;overflow:auto;}
+  .detail{flex:1.4;min-width:280px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px;}
+  .item{padding:10px;border-bottom:1px solid #eee;cursor:pointer;}
+  .item:hover,.item.sel{background:#eef6ee;}
+  .no{font-weight:700;}
+  .badge{font-size:11px;padding:2px 8px;border-radius:6px;background:#eee;margin-left:4px;}
+  .badge.s0{background:#ffe3e0;} .badge.s1{background:#fff0c2;} .badge.s2{background:#fde2c8;} .badge.s3{background:#dbeafe;} .badge.s4{background:#dcf5dc;}
+  .nolink{font-size:11px;color:#b45309;margin-left:4px;}
+  .card{background:#f8f9fb;border:1px solid var(--line);border-radius:8px;padding:10px;margin:8px 0;font-size:14px;}
+  .card div{margin:3px 0;word-break:break-all;} .card b{color:#555;}
+  .btns{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0;}
+  .hint{font-size:12px;color:var(--sub);}
+  #lmsg{height:70px;margin-top:6px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2 style="margin:6px 0">管理ページ</h2>
+
+  <div id="login">
+    <div class="row"><input id="pw" type="password" placeholder="パスワード"><button id="loginBtn">ログイン</button></div>
+    <p id="lerr" style="color:#c0392b;"></p>
+  </div>
+
+  <div id="main" style="display:none">
+    <div class="tiles" id="tiles"></div>
+    <div id="inqBox" style="display:none">
+      <div class="hint">🙋 担当者待ちのお問い合わせ（このお客さんにはボットが返事を止めています。対応が終わったら「対応済にする」を押すと、ボットが再開します）</div>
+      <div id="inq"></div>
+    </div>
+    <div class="tabs" id="tabs"></div>
+    <div class="layout">
+      <div class="list" id="list"></div>
+      <div class="detail">
+        <div id="empty" class="hint">← 左の一覧から、依頼を選んでください</div>
+        <div id="panel" style="display:none">
+          <div style="font-weight:800;font-size:17px" id="title"></div>
+          <div class="card" id="info"></div>
+          <div class="hint">状態を進める</div>
+          <div class="btns" id="sbtns"></div>
+          <div class="hint">お客さんにLINEで連絡する（LINEと結びついているお客さんだけ）</div>
+          <textarea id="lmsg" placeholder="メッセージを入力"></textarea>
+          <div class="btns"><button class="blue" id="sendBtn">LINEで送る</button></div>
+          <div class="hint" id="sendResult"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  var KEY = "", CUR = "", LIST = [], FILTER = "要対応";
+  var STATUSES = ["未対応", "代行中", "再入力待ち", "納品済", "完了"];
+  var TABS = ["要対応", "未対応", "代行中", "再入力待ち", "納品済", "完了", "すべて"];
+
+  function $(id){ return document.getElementById(id); }
+  function esc(s){ return String(s == null ? "" : s).replace(/[&<>"']/g, function(c){ return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]; }); }
+  function yen(n){ return "¥" + (Number(n) || 0).toLocaleString("ja-JP"); }
+  function sidx(s){ var i = STATUSES.indexOf(s); return i < 0 ? 0 : i; }
+
+  $("loginBtn").addEventListener("click", login);
+  $("pw").addEventListener("keydown", function(e){ if (e.key === "Enter") login(); });
+
+  function login(){
+    KEY = $("pw").value;
+    google.script.run.withSuccessHandler(function(r){
+      if (r && r.ok) {
+        $("login").style.display = "none"; $("main").style.display = "block";
+        LIST = r.list; renderAll(); loadStats();
+      } else { $("lerr").textContent = "パスワードが違います。"; }
+    }).withFailureHandler(function(e){ $("lerr").textContent = "エラー: " + (e && e.message ? e.message : e); }).adminList(KEY);
+  }
+
+  function loadStats(){
+    google.script.run.withSuccessHandler(function(s){
+      if (!s || !s.ok) return;
+      function t(l, v){ return '<div class="tile"><div class="l">' + l + '</div><div class="v">' + v + '</div></div>'; }
+      $("tiles").innerHTML = t("未対応", s.counts["未対応"] + "件") + t("代行中", s.counts["代行中"] + "件") +
+        t("再入力待ち", s.counts["再入力待ち"] + "件") + t("納品済", s.counts["納品済"] + "件") + t("今日の売上", yen(s.todaySum)) + t("今月の売上", yen(s.monthSum));
+    }).adminStats(KEY);
+    loadInquiries();
+  }
+
+  function loadInquiries(){
+    google.script.run.withSuccessHandler(function(r){
+      if (!r || !r.ok) return;
+      $("inqBox").style.display = r.list.length ? "block" : "none";
+      $("inq").innerHTML = r.list.map(function(q, i){
+        return '<div class="card" data-uid="' + esc(q.uid) + '">' +
+          '<div><b>' + esc(q.name) + '</b>　<span class="hint">' + esc(q.time) + (q.receiptNo ? '　' + esc(q.receiptNo) : '') + '</span></div>' +
+          '<div>' + esc(q.summary || "（要約なし）") + '</div>' +
+          '<textarea class="qmsg" placeholder="お客さんへの返事（LINEで届きます）" style="height:56px;margin-top:6px"></textarea>' +
+          '<div class="btns"><button class="blue qsend">LINEで送る</button><button class="qdone">対応済にする</button><button class="gray qignore">🚫 無視する</button><span class="hint qres"></span></div></div>';
+      }).join("");
+      Array.prototype.forEach.call($("inq").querySelectorAll(".card[data-uid]"), function(card){
+        var uid = card.getAttribute("data-uid"), res = card.querySelector(".qres");
+        card.querySelector(".qsend").addEventListener("click", function(){
+          var t = card.querySelector(".qmsg").value.trim();
+          if (!t) return;
+          res.textContent = "送信中...";
+          google.script.run.withSuccessHandler(function(r){
+            if (r && r.ok) { card.querySelector(".qmsg").value = ""; res.textContent = "送信しました。"; }
+            else { res.textContent = "送れませんでした：" + ((r && r.reason) || ""); }
+          }).withFailureHandler(function(e){ res.textContent = "エラー: " + (e && e.message ? e.message : e); }).adminSendLineInquiry(KEY, uid, t);
+        });
+        card.querySelector(".qdone").addEventListener("click", function(){
+          if (!confirm("このお客さんを「対応済」にして、ボットの返事を再開します。よろしいですか？")) return;
+          google.script.run.withSuccessHandler(function(){ loadInquiries(); }).adminResolveInquiry(KEY, uid);
+        });
+        card.querySelector(".qignore").addEventListener("click", function(){
+          if (!confirm("嫌がらせなどのため、このお客さんにはボットが一切反応しないようにします。\n（解除は「LINE記録」シートのステータスを「ボット対応」に戻す）\nよろしいですか？")) return;
+          google.script.run.withSuccessHandler(function(){ loadInquiries(); }).adminIgnoreInquiry(KEY, uid);
+        });
+      });
+    }).adminInquiries(KEY);
+  }
+
+  function renderAll(){ renderTabs(); renderList(); if (CUR) loadDetail(); }
+
+  function renderTabs(){
+    $("tabs").innerHTML = TABS.map(function(t){ return '<span class="tab' + (t === FILTER ? " on" : "") + '" data-t="' + t + '">' + t + '</span>'; }).join("");
+    Array.prototype.forEach.call($("tabs").querySelectorAll(".tab"), function(el){
+      el.addEventListener("click", function(){ FILTER = el.getAttribute("data-t"); renderTabs(); renderList(); });
+    });
+  }
+
+  function visible(o){
+    if (FILTER === "すべて") return true;
+    if (FILTER === "要対応") return o.status !== "完了";
+    return o.status === FILTER;
+  }
+
+  function renderList(){
+    var items = LIST.filter(visible);
+    $("list").innerHTML = items.map(function(o){
+      return '<div class="item' + (o.no === CUR ? " sel" : "") + '" data-no="' + esc(o.no) + '">' +
+        '<span class="no">' + esc(o.no) + '</span><span class="badge s' + sidx(o.status) + '">' + esc(o.status) + '</span>' +
+        (o.line ? '' : '<span class="nolink">LINE未連携</span>') +
+        '<br><small>' + esc(o.requester) + '　' + esc(o.menu) + '</small></div>';
+    }).join("") || '<div class="item hint">該当する依頼はありません</div>';
+    Array.prototype.forEach.call($("list").querySelectorAll(".item[data-no]"), function(el){
+      el.addEventListener("click", function(){ CUR = el.getAttribute("data-no"); renderList(); loadDetail(); });
+    });
+  }
+
+  function row(l, v){ return '<div><b>' + esc(l) + '</b>：' + esc(v) + '</div>'; }
+
+  function loadDetail(){
+    google.script.run.withSuccessHandler(function(r){
+      if (!r || !r.ok) return;
+      var d = r.record;
+      $("empty").style.display = "none"; $("panel").style.display = "block";
+      $("title").textContent = d["受付番号"] + "（" + d["ステータス"] + "）";
+      var photo = d["支払い写真"] ? '<div><b>支払い写真</b>：<a href="' + esc(d["支払い写真"]) + '" target="_blank" rel="noopener">写真を開く</a></div>' : row("支払い写真", "なし");
+      $("info").innerHTML = row("依頼者(LINE名)", d["依頼者"]) + row("受付日時", d["受付日時"]) + row("希望メニュー", d["希望メニュー"]) +
+        row("金額", yen(d["金額"])) + row("代行アカウント", d["連絡先"]) + row("備考", d["備考"] || "なし") + photo +
+        row("LINE連携", r.line ? "済み" : "まだ（お客さんがLINEに受付番号を送るまで通知できません）") +
+        (r.fixUrl ? '<div><b>入力し直し用リンク</b>（お客さんに送る用）：<br><input type="text" readonly value="' + esc(r.fixUrl) + '" style="width:100%;font-size:12px;padding:6px" onclick="this.select()"></div>' : '');
+      $("sbtns").innerHTML = STATUSES.map(function(s){
+        var cls = s === d["ステータス"] ? "gray" : (s === "代行中" ? "amber" : "");
+        return '<button class="' + cls + '" data-s="' + s + '"' + (s === d["ステータス"] ? " disabled" : "") + '>' + s + (s === "未対応" ? "に戻す" : "にする") + '</button>';
+      }).join("");
+      Array.prototype.forEach.call($("sbtns").querySelectorAll("button[data-s]"), function(b){
+        b.addEventListener("click", function(){ setStatus(b.getAttribute("data-s")); });
+      });
+    }).adminDetail(KEY, CUR);
+  }
+
+  function setStatus(s){
+    if (!CUR) return;
+    if (s === "完了" && !confirm("「完了」にします。お客さんのLINEに完了のお知らせが届き、Discordの通知は消えます。よろしいですか？")) return;
+    if (s === "納品済" && !confirm("「納品済」にします。お客さんのLINEに納品のお知らせが届きます。よろしいですか？")) return;
+    if (s === "再入力待ち" && !confirm("「再入力待ち」にします。お客さんのLINEに、メールアドレスとパスワードの入力し直しのお願いが届きます。よろしいですか？")) return;
+    google.script.run.withSuccessHandler(function(r){
+      if (r && r.ok) { refresh(); } else { alert("変更できませんでした"); }
+    }).withFailureHandler(function(e){ alert("エラー: " + (e && e.message ? e.message : e)); }).adminSetStatus(KEY, CUR, s);
+  }
+
+  $("sendBtn").addEventListener("click", function(){
+    var t = $("lmsg").value.trim();
+    if (!t || !CUR) return;
+    $("sendBtn").disabled = true; $("sendResult").textContent = "送信中...";
+    google.script.run.withSuccessHandler(function(r){
+      $("sendBtn").disabled = false;
+      if (r && r.ok) { $("lmsg").value = ""; $("sendResult").textContent = "送信しました。"; }
+      else { $("sendResult").textContent = "送れませんでした：" + ((r && r.reason) || ""); }
+    }).withFailureHandler(function(e){ $("sendBtn").disabled = false; $("sendResult").textContent = "エラー: " + (e && e.message ? e.message : e); })
+      .adminSendLine(KEY, CUR, t);
+  });
+
+  function refresh(){
+    google.script.run.withSuccessHandler(function(r){
+      if (r && r.ok) { LIST = r.list; renderList(); if (CUR) loadDetail(); }
+    }).adminList(KEY);
+    loadStats();
+  }
+  setInterval(function(){ if ($("main").style.display !== "none") refresh(); }, 15000);
+</script>
+</body>
+</html>

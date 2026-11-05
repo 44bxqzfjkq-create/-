@@ -1,0 +1,1002 @@
+// 使い方： node daiko-system/test/run.js
+// Googleスプレッドシート／LINE／Claude／Discord の代わりに「仮の部品」を使って、
+// Code.gs と Bot.gs の動きを一通り確かめます。本物のサービスには一切つながりません。
+"use strict";
+const fs = require("fs");
+const path = require("path");
+const vm = require("vm");
+const assert = require("assert");
+
+const root = path.join(__dirname, "..");
+let passed = 0;
+const results = [];
+const ALL_LINE_TEXTS = []; // ボットがLINEに送った文章（あとで、スマホの幅に収まっているか調べる）
+function test(name, fn) {
+  try { fn(); passed++; results.push("  OK   " + name); }
+  catch (e) { results.push("  NG   " + name + "\n         " + (e && e.message ? e.message : e)); process.exitCode = 1; }
+}
+
+// ---------------- 仮のGoogle部品 ----------------
+function makeEnv(props) {
+  const logs = [];
+  const fetchLog = [];
+  const aiQueue = [];            // Claudeの返事（先頭から使う）
+  const cacheStore = {};
+  const sheets = {};
+  const triggers = [];
+  const docStore = {};
+
+  function colToIdx(c) { return c - 1; }
+  function makeSheet(name) {
+    const data = []; // data[r-1][c-1]
+    const sh = {
+      name, data, frozen: 0,
+      getName() { return name; },
+      getMaxRows() { return 1000; },
+      getLastRow() { for (let i = data.length - 1; i >= 0; i--) if ((data[i] || []).some(v => v !== "" && v !== undefined)) return i + 1; return 0; },
+      getLastColumn() { return Math.max(0, ...data.map(r => (r || []).length)); },
+      appendRow(arr) { const r = sh.getLastRow() + 1; data[r - 1] = arr.slice(); },
+      deleteRow(r) { data.splice(r - 1, 1); },
+      setFrozenRows(n) { sh.frozen = n; },
+      hideColumns() { return sh; },
+      getRange(r, c, nr, nc) {
+        nr = nr || 1; nc = nc || 1;
+        const rg = {
+          getValues() { const out = []; for (let i = 0; i < nr; i++) { const row = []; for (let j = 0; j < nc; j++) { const v = (data[r - 1 + i] || [])[c - 1 + j]; row.push(v === undefined ? "" : v); } out.push(row); } return out; },
+          getValue() { return rg.getValues()[0][0]; },
+          setValue(v) { (data[r - 1] = data[r - 1] || [])[c - 1] = v; return rg; },
+          setValues(vs) { vs.forEach((row, i) => row.forEach((v, j) => { (data[r - 1 + i] = data[r - 1 + i] || [])[c - 1 + j] = v; })); return rg; },
+          clearContent() { for (let i = 0; i < nr; i++) for (let j = 0; j < nc; j++) { (data[r - 1 + i] = data[r - 1 + i] || [])[c - 1 + j] = ""; } return rg; },
+          getRow() { return r; }, getColumn() { return c; }, getNumRows() { return nr; }, getSheet() { return sh; },
+          setFontWeight() { return rg; }, setBackground() { return rg; }, setNumberFormat() { return rg; }, setDataValidation() { return rg; }
+        };
+        return rg;
+      }
+    };
+    return sh;
+  }
+  const ss = {
+    getSheetByName(n) { return sheets[n] || null; },
+    insertSheet(n) { sheets[n] = makeSheet(n); return sheets[n]; }
+  };
+
+  const ctx = {
+    console, Logger: { log: (m) => logs.push(String(m)) },
+    PropertiesService: {
+      getScriptProperties: () => ({ getProperty: (k) => (k in props ? props[k] : null) }),
+      getDocumentProperties: () => ({ getProperty: (k) => (k in docStore ? docStore[k] : null), setProperty: (k, v) => { docStore[k] = v; }, deleteProperty: (k) => { delete docStore[k]; } })
+    },
+    CacheService: { getScriptCache: () => ({
+      get: (k) => (k in cacheStore ? cacheStore[k] : null),
+      put: (k, v) => { cacheStore[k] = v; },
+      remove: (k) => { delete cacheStore[k]; } }) },
+    LockService: { getScriptLock: () => ({ waitLock() {}, releaseLock() {} }) },
+    SpreadsheetApp: {
+      getActiveSpreadsheet: () => ss,
+      newDataValidation: () => { const b = { requireValueInList() { return b; }, build() { return {}; } }; return b; }
+    },
+    ScriptApp: {
+      getService: () => ({ getUrl: () => "https://script.google.com/macros/s/TEST/exec" }),
+      getProjectTriggers: () => [],
+      deleteTrigger() {},
+      WeekDay: { MONDAY: "MONDAY" },
+      newTrigger: (fn) => { const t = { forSpreadsheet() { return t; }, onEdit() { return t; }, timeBased() { return t; }, everyMinutes() { return t; }, everyDays() { return t; }, onWeekDay() { return t; }, onMonthDay() { return t; }, atHour() { return t; }, inTimezone() { return t; }, create() { triggers.push(fn); return t; } }; return t; }
+    },
+    DriveApp: {
+      Access: { ANYONE_WITH_LINK: 1 }, Permission: { VIEW: 1 },
+      getFoldersByName: () => ({ hasNext: () => false }),
+      createFolder: () => ({ createFile: (b) => ({ setSharing() {}, getUrl: () => "https://drive.example/" + b.name }) })
+    },
+    HtmlService: {}, ContentService: { createTextOutput: (t) => ({ text: t }) },
+    Utilities: {
+      getUuid: () => "abcdef12-3456-7890-abcd-ef1234567890",
+      sleep: () => {},
+      base64EncodeWebSafe: (s) => Buffer.from(String(s)).toString("base64"),
+      base64Decode: (s) => Array.from(Buffer.from(s, "base64")),
+      newBlob: (bytes, type, name) => ({ bytes, type, name }),
+      formatDate: (d, tz, f) => {
+        const j = new Date(d.getTime() + 9 * 3600 * 1000), p = (n) => String(n).padStart(2, "0");
+        return f.replace("yyyy", j.getUTCFullYear()).replace("MM", p(j.getUTCMonth() + 1)).replace("dd", p(j.getUTCDate()))
+          .replace("HH", p(j.getUTCHours())).replace("mm", p(j.getUTCMinutes())).replace("ss", p(j.getUTCSeconds()));
+      }
+    },
+    UrlFetchApp: {
+      fetch: (url, opts) => {
+        opts = opts || {};
+        const body = opts.payload ? JSON.parse(opts.payload) : null;
+        fetchLog.push({ url, method: opts.method || "get", body, headers: opts.headers || {} });
+        if (url.indexOf("api.line.me/v2/bot/message") >= 0 && body) body.messages.forEach(m => ALL_LINE_TEXTS.push(m.text));
+        const res = (code, text) => ({ getResponseCode: () => code, getContentText: () => text });
+        if (url.indexOf("api.anthropic.com") >= 0) {
+          const next = aiQueue.shift();
+          if (!next) return res(500, "no scripted ai response");
+          if (next.error) return res(next.error, next.errorBody || "error body");
+          if (next.raw) return res(200, JSON.stringify(next.raw));
+          return res(200, JSON.stringify({ content: [{ type: "text", text: next.text }] }));
+        }
+        if (url.indexOf("/profile/") >= 0) return res(200, JSON.stringify({ displayName: "花子" }));
+        if (url.indexOf("discord.test") >= 0 && url.indexOf("wait=true") >= 0) return res(200, JSON.stringify({ id: "MSG" + fetchLog.length }));
+        return res(200, "{}");
+      }
+    }
+  };
+  vm.createContext(ctx);
+  for (const f of ["Manual.gs", "FixedReplies.gs", "Code.gs", "Bot.gs", "AiStaff.gs"]) {
+    vm.runInContext(fs.readFileSync(path.join(root, f), "utf8"), ctx, { filename: f });
+  }
+  const run = (code) => vm.runInContext(code, ctx);
+  return { ctx, run, logs, fetchLog, aiQueue, cacheStore, sheets, ss, triggers, docStore };
+}
+
+const BASE_PROPS = {
+  LINE_TOKEN: "TOKEN", CLAUDE_API_KEY: "KEY", WEBHOOK_KEY: "secretkey", ADMIN_KEY: "adminpw", WORKER_KEY: "workerpw",
+  DISCORD_NORMAL: "https://discord.test/normal", DISCORD_PRIORITY: "https://discord.test/priority", LINE_BASIC_ID: "@abc123"
+};
+const IMG = { dataUrl: "data:image/png;base64,iVBORw0KGgo=" };
+const lineCalls = (env, kind) => env.fetchLog.filter(c => c.url.indexOf("/message/" + kind) >= 0);
+const aiCalls = (env) => env.fetchLog.filter(c => c.url.indexOf("api.anthropic.com") >= 0);
+const discordCalls = (env) => env.fetchLog.filter(c => c.url.indexOf("discord.test") >= 0);
+
+// ---------------- 1. 文章を調べる部分 ----------------
+{
+  const env = makeEnv(BASE_PROPS);
+  const cred = (t) => env.run("looksLikeCredentials")(t);
+  const close = (t) => env.run("looksLikeClosing")(t);
+
+  test("IDやパスワードらしき文字を見つける", () => {
+    ["パスワードはabc12345です", "password: Tsumu1234", "メール taro@example.com pass1234", "taro@example.com:Pass1234",
+     "ID: tsumu_user1", "ＩＤ：abc123", "Tsumu1234!!", "ログインID=abc12345",
+     "パス abcd1234", "taro@example.com", "0901234567 abcd1234", "ぱすわーど tsumu2024", "パスワード：Hanako_Tsum",
+     "メアド taro@example.com　パス Qwerty99", "暗証番号 1234abcd"].forEach(t => assert.ok(cred(t), "検出できない: " + t));
+  });
+  test("ふつうの質問は止めない", () => {
+    ["パスワードは必要ですか？", "パスワード変更はできますか", "納期はどれくらいですか？", "T-20261024-001",
+     "受付番号 T-20261024-001 コード a1b2c3", "ありがとうございます", "料金を教えてください", "09012345678", "メールアドレスは必要ですか",
+     "パスワードはLINEで送ればいいですか？", "password reset?", "OK thanks", "パスタ食べたい", "https://example.com/abc123"]
+      .forEach(t => assert.ok(!cred(t), "止めてしまう: " + t));
+  });
+  test("お礼・確認の言葉は「完了」と察知する", () => {
+    ["ありがとう", "ありがとうございました！", "OK", "ｏｋです", "確認しました", "受け取りました", "助かりました", "大丈夫です", "了解です"]
+      .forEach(t => assert.ok(close(t), "察知できない: " + t));
+  });
+  test("まだ問題がありそうな言葉は「完了」にしない", () => {
+    ["ありがとう、でもまだ反映されてない", "ありがとう。次はいつですか？", "確認しました、おかしいです", "返金お願いします",
+     "ありがとうございます！ところで別の依頼をお願いしたいのですが、料金はいくらになりますか", "token"]
+      .forEach(t => assert.ok(!close(t), "完了にしてしまう: " + t));
+  });
+  test("受付番号とコードを取り出す", () => {
+    const l = env.run("extractLink")("受付番号 T-20261024-001 コード A1B2C3");
+    assert.strictEqual(l.receiptNo, "T-20261024-001"); assert.strictEqual(l.code, "a1b2c3");
+    const l2 = env.run("extractLink")("Ｔ－20261024－001 code:ff00aa");
+    assert.strictEqual(l2.receiptNo, "T-20261024-001"); assert.strictEqual(l2.code, "ff00aa");
+  });
+  test("AIの返事（JSON）を読み取る／壊れていたら null", () => {
+    const p = env.run("parseAiJson");
+    const ok = p('説明です {"reply":"こんにちは","need_staff":true,"closing":false,"summary":"料金の質問"} 以上');
+    assert.strictEqual(ok.reply, "こんにちは"); assert.strictEqual(ok.needStaff, true); assert.strictEqual(ok.closing, false);
+    assert.strictEqual(p("ただの文章"), null); assert.strictEqual(p('{"reply":""}'), null); assert.strictEqual(p("{壊れた}"), null);
+  });
+  test("LINEボタンのリンクが正しい形になる", () => {
+    const u = env.run("buildLineUrl")("@abc123", "受付番号 T-1 コード aaaaaa");
+    assert.strictEqual(u, "https://line.me/R/oaMessage/@abc123/?" + encodeURIComponent("受付番号 T-1 コード aaaaaa"));
+    assert.strictEqual(env.run("buildLineUrl")("abc123", "x"), "https://line.me/R/oaMessage/@abc123/?x");
+    assert.strictEqual(env.run("buildLineUrl")("", "x"), "");
+  });
+}
+
+// ---------------- 2. 決まった返事 ----------------
+{
+  const env = makeEnv(BASE_PROPS);
+  const fixed = env.run("matchFixedReply");
+  test("未設定の決まった返事は送らない（AIに回す）", () => {
+    assert.strictEqual(fixed("1"), null); assert.strictEqual(fixed("メニュー"), null); assert.strictEqual(fixed("納期"), null);
+  });
+  test("設定済みの決まった返事は、そのまま返す（全角・大文字小文字の違いも吸収）", () => {
+    const price = fixed("料金");
+    assert.ok(price.indexOf("・コイン指定（5万〜2億）\n　💴 300円") >= 0, price);
+    assert.ok(price.indexOf("・プレミアムBOX完売\n　💴 1,500円") >= 0, price);
+    assert.ok(price.indexOf("1つあたり") >= 0 && price.indexOf("300円＋300円＝600円") >= 0, "合計の考え方が書いていない");
+    Object.keys(env.run("CONFIG").MENUS).forEach(n => assert.ok(price.indexOf("・" + n + "\n") >= 0, "料金表にない: " + n));
+    assert.ok(fixed("【このままメッセージどうぞ】").indexOf("どうぞ") >= 0);
+    assert.ok(fixed(" 流れ ").indexOf("ご注文の流れ") >= 0);
+    env.run('FIXED_REPLIES["1"] = "これは1番の返事です"; FIXED_REPLIES["ギフト"] = "ギフトの返事"');
+    assert.strictEqual(fixed("１"), "これは1番の返事です");
+    assert.strictEqual(fixed("ギフト"), "ギフトの返事");
+    assert.strictEqual(fixed("ギフトについて"), null);
+  });
+  test("AIに渡すマニュアルに料金表が入る", () => {
+    assert.ok(env.run("buildManual")().indexOf("【料金表】") >= 0);
+    assert.ok(env.run("buildManual")().indexOf("コイン指定（5万〜2億）：300円") >= 0);
+    const m = env.run("buildManual")();
+    ["1時間〜3日", "5分〜24時間", "商品1つあたりの値段", "自動で完了になります", "キャンセルはできません", "こちらのミスがあった場合は、返金します", "BANされることは、ほぼありません"]
+      .forEach(k => assert.ok(m.indexOf(k) >= 0, "マニュアルにない: " + k));
+    assert.ok(/【よくある質問】\s*【未設定】/.test(m), "よくある質問は、まだ担当者に回す");
+  });
+  test("AIへの指示に、お店の名前・話し方・返事の例・守ること・マニュアルが入る", () => {
+    const p = env.run("buildSystemStatic")();
+    ["「じょーじ」", "【話し方】", "まず、聞かれたことにまっすぐ答えます", "【返事の例】", "need_staff: true",
+     "うそはつかずに", "【未設定】のこと", "【マニュアル】", "1行は全角14文字"].forEach(k => assert.ok(p.indexOf(k) >= 0, "入っていない: " + k));
+  });
+  test("AIの長い返事は、句読点のところで改行し直して、スマホで変に折り返さない", () => {
+    const wrap = (t) => env.run("wrapForPhone")(t, 14);
+    const w = env.run("displayWidth");
+    const long = "ご連絡ありがとうございます。どのようなご用件でしょうか？ご注文はメニューの「注文」から注文フォームをご利用ください。";
+    const out = wrap(long);
+    out.split("\n").forEach(l => assert.ok(w(l) <= 15, "長すぎる行: " + l + " (" + w(l) + ")"));
+    assert.strictEqual(out.replace(/\n/g, ""), long, "文字が消えたり増えたりしている");
+    const long2 = "料金やご注文の流れについてのご質問も、お気軽にどうぞ。";
+    wrap(long2).split("\n").forEach(l => assert.ok(w(l) <= 15, "長すぎる行: " + l));
+    assert.ok(wrap("すごいですね、ありがとうございます").indexOf("す\nごい") < 0, "言葉の途中で切っている");
+    const nums = wrap("プレイヤーレベルMAXは200円でスコアカンストも200円です");
+    nums.split("\n").forEach(l => assert.ok(w(l) <= 15, "長すぎる行: " + l));
+    assert.ok(!/[0-9]\n[0-9]/.test(nums) && !/[0-9]\n円/.test(nums), "数字の途中で切っている: " + nums);
+    assert.ok(nums.indexOf("200円") >= 0);
+    assert.strictEqual(wrap("短い文です😊"), "短い文です😊");
+    assert.strictEqual(wrap("https://script.google.com/macros/s/AAAAAAAAAAAAAAAAAAAAAAAAAAA/exec"), "https://script.google.com/macros/s/AAAAAAAAAAAAAAAAAAAAAAAAAAA/exec", "URLは切らない");
+    assert.strictEqual(w("1️⃣ フォーム"), 2 + 0.5 + 4);
+  });
+}
+
+// ---------------- 3. 注文からLINE連携・納品・完了まで ----------------
+{
+  const env = makeEnv(BASE_PROPS);
+  env.run("setup")();
+  const submit = (extra) => env.run("submitOrder")(Object.assign({ selected: ["コイン指定（5万〜2億）"], requester: "花子", amount: 300, contact: "a@b.com:secretPW99", note: "お願いします", image: IMG }, extra || {}));
+  const handle = (uid, text) => { env.run("BOT_STATE").replied = false; env.run("handleTextMessage")(uid, "rt-" + Math.random(), text); };
+  const sheet = () => env.sheets["受付"];
+  const lastReply = () => { const c = lineCalls(env, "reply"); return c.length ? c[c.length - 1].body.messages[0].text : ""; };
+
+  let order;
+  test("注文を送ると、受付番号とLINE用のリンクが返る", () => {
+    order = submit();
+    assert.strictEqual(order.ok, true);
+    assert.ok(/^T-\d{8}-001$/.test(order.receiptNo), order.receiptNo);
+    assert.ok(/^受付番号 T-\d{8}-001 コード abcdef$/.test(order.lineText), order.lineText);
+    assert.ok(order.lineUrl.indexOf("https://line.me/R/oaMessage/@abc123/?") === 0);
+  });
+  test("Discordの通知に、代行アカウント・パスワード・写真リンクが載らない", () => {
+    const d = discordCalls(env).find(c => c.body && c.body.embeds);
+    assert.ok(d, "Discord通知がない");
+    const s = JSON.stringify(d.body);
+    assert.ok(s.indexOf("secretPW99") < 0 && s.indexOf("a@b.com") < 0 && s.indexOf("drive.example") < 0, "漏れている");
+    assert.ok(s.indexOf(order.receiptNo) >= 0 && s.indexOf("花子") >= 0);
+  });
+  test("連続で同じ内容を送ると止める", () => {
+    const again = submit();
+    assert.strictEqual(again.ok, false);
+  });
+  test("商品なし・依頼者なしは受け付けない", () => {
+    assert.strictEqual(submit({ selected: [], contact: "x1" }).ok, false);
+    assert.strictEqual(submit({ requester: "", contact: "x2" }).ok, false);
+  });
+
+  test("コードが違うと結びつかない／正しいコードで結びつく", () => {
+    handle("U1", "受付番号 " + order.receiptNo + " コード 000000");
+    assert.ok(lastReply().indexOf("合いませんでした") >= 0, lastReply());
+    assert.strictEqual(String(sheet().getRange(2, 14).getValue()), "");
+    handle("U1", order.lineText);
+    assert.ok(lastReply().indexOf("確認しました") >= 0, lastReply());
+    assert.strictEqual(String(sheet().getRange(2, 14).getValue()), "U1");
+  });
+  test("他の人が同じ受付番号を結びつけようとすると、担当者に連絡が行く", () => {
+    const before = discordCalls(env).length;
+    handle("U2", order.lineText);
+    assert.ok(lastReply().indexOf("担当者から連絡します") >= 0);
+    assert.ok(discordCalls(env).length > before);
+    assert.strictEqual(String(sheet().getRange(2, 14).getValue()), "U1");
+  });
+  test("番号だけでは、他人の状況は見られない／本人は見られる", () => {
+    handle("U2", "受付番号 " + order.receiptNo);
+    assert.ok(lastReply().indexOf("確認コードが必要") >= 0);
+    handle("U1", "受付番号 " + order.receiptNo);
+    assert.ok(lastReply().indexOf("順番に対応") >= 0, lastReply());
+  });
+  test("「進捗」で今の状況が返る（AIは使わない）", () => {
+    const n = aiCalls(env).length;
+    handle("U1", "進捗");
+    assert.ok(lastReply().indexOf("順番に対応") >= 0);
+    assert.strictEqual(aiCalls(env).length, n);
+  });
+  test("LINE記録シートに、お客さん名と受付番号が入る", () => {
+    const sh = env.sheets["LINE記録"];
+    const row = sh.getRange(2, 1, 1, 6).getValues()[0];
+    assert.strictEqual(row[1], "花子"); assert.strictEqual(row[4], order.receiptNo); assert.strictEqual(row[5], "U1");
+  });
+
+  test("管理者：パスワードが違うと何もできない", () => {
+    assert.strictEqual(env.run("adminList")("bad").ok, false);
+    assert.strictEqual(env.run("adminSetStatus")("bad", order.receiptNo, "代行中").ok, false);
+    assert.strictEqual(env.run("workerList")("adminpw").ok, false); // 管理者のパスワードでは代行者ページに入れない
+  });
+  test("管理者：代行中にすると、代行者ページに出る（見えるのは最低限だけ）", () => {
+    assert.strictEqual(env.run("workerList")("workerpw").list.length, 0);
+    assert.strictEqual(env.run("adminSetStatus")("adminpw", order.receiptNo, "代行中").ok, true);
+    const w = env.run("workerList")("workerpw");
+    assert.strictEqual(w.list.length, 1);
+    assert.deepStrictEqual(Object.keys(w.list[0]).sort(), ["account", "fixed", "menu", "no", "note", "started"]);
+    assert.ok(JSON.stringify(w).indexOf("花子") < 0 && JSON.stringify(w).indexOf("drive.example") < 0);
+  });
+  test("代行者が「代行を始める」→ お客さんに「終わるまでログインしないで」と届く（1回だけ）", () => {
+    handle("U1", "進捗");
+    assert.ok(lastReply().indexOf("順番待ち") >= 0, "始める前は順番待ちと答える: " + lastReply());
+    assert.strictEqual(env.run("workerStart")("adminpw", order.receiptNo).ok, false, "代行者のパスワードが必要");
+    const n = lineCalls(env, "push").length;
+    assert.strictEqual(env.run("workerStart")("workerpw", order.receiptNo).ok, true);
+    const p = lineCalls(env, "push")[n];
+    assert.strictEqual(p.body.to, "U1");
+    assert.ok(p.body.messages[0].text.indexOf("ログインしないでください") >= 0, p.body.messages[0].text);
+    env.run("workerStart")("workerpw", order.receiptNo);
+    assert.strictEqual(lineCalls(env, "push").length, n + 1, "2回押しても、お知らせは1回だけ");
+    assert.strictEqual(env.run("workerList")("workerpw").list[0].started, true);
+    handle("U1", "進捗");
+    assert.ok(lastReply().indexOf("代行中") >= 0 && lastReply().indexOf("ログインしないで") >= 0, lastReply());
+  });
+  test("代行者が確認番号を送る → お客さんに届く（数字以外・代行中以外は送らない）", () => {
+    assert.strictEqual(env.run("workerSendCode")("workerpw", order.receiptNo, "abc").ok, false);
+    assert.strictEqual(env.run("workerSendCode")("workerpw", order.receiptNo, "12").ok, false);
+    assert.strictEqual(env.run("workerSendCode")("adminpw", order.receiptNo, "1234").ok, false);
+    const n = lineCalls(env, "push").length;
+    assert.strictEqual(env.run("workerSendCode")("workerpw", order.receiptNo, "１２３４").ok, true, "全角の数字も受け付ける");
+    const t = lineCalls(env, "push")[n].body.messages[0].text;
+    assert.ok(t.indexOf("1234") >= 0 && t.indexOf("確認番号") >= 0, t);
+  });
+  const TK = "abcdef1234567890abcdef1234567890";
+  const status = () => env.run("normStatus")(sheet().getRange(2, 10).getValue());
+  test("代行者：「ログインできない」→ お客さんのLINEに、入力し直し用のリンクが届く", () => {
+    assert.strictEqual(env.run("workerLoginFail")("adminpw", order.receiptNo).ok, false); // 代行者のパスワードが必要
+    const n = lineCalls(env, "push").length;
+    assert.strictEqual(env.run("workerLoginFail")("workerpw", order.receiptNo).ok, true);
+    assert.strictEqual(status(), "再入力待ち");
+    const p = lineCalls(env, "push")[n];
+    assert.strictEqual(p.body.to, "U1");
+    const txt = p.body.messages[0].text;
+    assert.ok(txt.indexOf("ログインできませんでした") >= 0 && txt.indexOf(order.receiptNo) >= 0, txt);
+    assert.ok(txt.indexOf("?page=fix&no=" + encodeURIComponent(order.receiptNo) + "&t=" + TK) >= 0, txt);
+    assert.strictEqual(env.run("workerList")("workerpw").list.length, 0, "再入力待ちの間は、代行者の一覧から消える");
+    assert.strictEqual(env.run("workerLoginFail")("workerpw", order.receiptNo).ok, false, "二重には押せない");
+  });
+  test("再入力待ちの間：「進捗」やLINEに書いたパスワードには、入力し直し用リンクで答える（記録には残さない）", () => {
+    handle("U1", "進捗");
+    assert.ok(lastReply().indexOf("ログインできなかった") >= 0 && lastReply().indexOf("page=fix") >= 0, lastReply());
+    handle("U1", "a@b.com newPass123");
+    assert.ok(lastReply().indexOf("page=fix") >= 0 && lastReply().indexOf("送らないでください") >= 0, lastReply());
+    assert.ok((JSON.stringify(env.sheets["LINE記録"]) + JSON.stringify(env.cacheStore)).indexOf("newPass123") < 0);
+  });
+  test("入力し直しページ：合言葉が違うと使えない／前のパスワードは見せない", () => {
+    assert.strictEqual(env.run("fixInfo")(order.receiptNo, "wrong").ok, false);
+    assert.strictEqual(env.run("fixInfo")(order.receiptNo, "").ok, false);
+    assert.strictEqual(env.run("fixSubmit")(order.receiptNo, "wrong", "x@y.com:zz").ok, false);
+    const info = env.run("fixInfo")(order.receiptNo, TK);
+    assert.strictEqual(info.ok, true);
+    assert.strictEqual(info.hint, "a***@b.com");
+    assert.ok(JSON.stringify(info).indexOf("secretPW99") < 0);
+    assert.strictEqual(env.run("fixSubmit")(order.receiptNo, TK, "  ").ok, false, "空は受け付けない");
+  });
+  test("入力し直すと、代行中に戻って代行者の一覧に「入力し直しました」付きで出る", () => {
+    const d = discordCalls(env).length;
+    assert.strictEqual(env.run("fixSubmit")(order.receiptNo, TK, "a@b.com:RightPW77").ok, true);
+    assert.strictEqual(status(), "代行中");
+    assert.strictEqual(sheet().getRange(2, 7).getValue(), "a@b.com:RightPW77");
+    const w = env.run("workerList")("workerpw").list;
+    assert.strictEqual(w.length, 1); assert.strictEqual(w[0].fixed, true); assert.strictEqual(w[0].account, "a@b.com:RightPW77");
+    assert.strictEqual(w[0].started, false, "入力し直しのあとは、もう一度「代行を始める」から（お客さんに知らせ直す）");
+    const note = discordCalls(env).slice(d).map(c => JSON.stringify(c.body)).join("");
+    assert.ok(note.indexOf("入力し直されました") >= 0 && note.indexOf("RightPW77") < 0, "Discordにパスワードが載っている／通知がない");
+    assert.strictEqual(env.run("fixSubmit")(order.receiptNo, TK, "x@y.com:again1").ok, false, "終わったリンクは使えない");
+    assert.strictEqual(env.run("fixInfo")(order.receiptNo, TK).ok, false);
+  });
+  test("LINE未連携のお客さんの場合は、入力し直し用リンクをDiscordで管理者に渡す／管理ページにも出る", () => {
+    const o2 = submit({ contact: "c@d.com:pw2", requester: "次郎" });
+    env.run("adminSetStatus")("adminpw", o2.receiptNo, "代行中");
+    const d = discordCalls(env).length;
+    assert.strictEqual(env.run("workerLoginFail")("workerpw", o2.receiptNo).ok, true);
+    const msg = discordCalls(env).slice(d).map(c => (c.body && c.body.content) || "").join("");
+    assert.ok(msg.indexOf("LINE未連携") >= 0 && msg.indexOf("page=fix&no=" + encodeURIComponent(o2.receiptNo)) >= 0, msg);
+    const det = env.run("adminDetail")("adminpw", o2.receiptNo);
+    assert.ok(det.fixUrl.indexOf("page=fix") >= 0);
+    assert.strictEqual(env.run("adminDetail")("adminpw", order.receiptNo).fixUrl, "", "再入力待ちでなければリンクは出さない");
+    assert.strictEqual(env.run("adminStats")("adminpw").counts["再入力待ち"], 1);
+    env.run("adminSetStatus")("adminpw", o2.receiptNo, "完了");
+  });
+  test("代行者：納品完了にすると、お客さんにLINEが届く", () => {
+    const n = lineCalls(env, "push").length;
+    assert.strictEqual(env.run("workerDeliver")("workerpw", order.receiptNo).ok, true);
+    const pushes = lineCalls(env, "push");
+    assert.strictEqual(pushes.length, n + 1);
+    assert.strictEqual(pushes[n].body.to, "U1");
+    assert.ok(pushes[n].body.messages[0].text.indexOf("納品しました") >= 0);
+    assert.strictEqual(env.run("workerDeliver")("workerpw", order.receiptNo).ok, false); // 二重には押せない
+  });
+  test("納品後のまだ問題がありそうな返信では、完了にしない", () => {
+    env.aiQueue.push({ text: JSON.stringify({ reply: "確認しますね。", need_staff: true, closing: false, summary: "反映されていない" }) });
+    handle("U1", "ありがとう、でもまだ反映されてない");
+    assert.strictEqual(env.run("normStatus")(sheet().getRange(2, 10).getValue()), "納品済");
+  });
+  test("納品後の「ありがとう」で、自動で完了＋Discordのメッセージが消える", () => {
+    const before = discordCalls(env).filter(c => c.method === "delete").length;
+    const n = aiCalls(env).length;
+    handle("U1", "ありがとうございました！");
+    assert.strictEqual(env.run("normStatus")(sheet().getRange(2, 10).getValue()), "完了");
+    assert.ok(lastReply().indexOf("完了です") >= 0);
+    assert.ok(lastReply().indexOf("おすすめ") >= 0 && lastReply().indexOf("https://line.me/R/ti/p/%40abc123") >= 0, "お礼・紹介のお願い・友だち追加リンクがない: " + lastReply());
+    assert.strictEqual(aiCalls(env).length, n, "ルールで察知できる場合はAIを使わない");
+    assert.strictEqual(discordCalls(env).filter(c => c.method === "delete").length, before + 1);
+  });
+  test("「OK」と返事がなくても、納品から24時間で自動で完了になる", () => {
+    const o3 = submit({ contact: "e@f.com:pw33", requester: "三郎" });
+    handle("U3", o3.lineText);
+    env.run("adminSetStatus")("adminpw", o3.receiptNo, "代行中");
+    env.run("workerDeliver")("workerpw", o3.receiptNo);
+    const row = env.run("findOrderRow")(sheet(), o3.receiptNo);
+    const st = () => env.run("normStatus")(sheet().getRange(row, 10).getValue());
+    assert.ok(lineCalls(env, "push").pop().body.messages[0].text.indexOf("24時間後に") >= 0, "納品のお知らせに自動完了の説明がない");
+    env.run("remindUnhandled")();
+    assert.strictEqual(st(), "納品済", "24時間たつ前に完了にしてしまった");
+    sheet().getRange(row, 16).setValue(new Date(Date.now() - 25 * 3600000));
+    const del = discordCalls(env).filter(c => c.method === "delete").length;
+    env.run("remindUnhandled")();
+    assert.strictEqual(st(), "完了");
+    const p = lineCalls(env, "push").pop();
+    assert.strictEqual(p.body.to, "U3");
+    assert.ok(p.body.messages[0].text.indexOf("完了にしました") >= 0, p.body.messages[0].text);
+    assert.ok(p.body.messages[0].text.indexOf("おすすめ") >= 0, "自動完了にも紹介のお願いがない");
+    assert.strictEqual(discordCalls(env).filter(c => c.method === "delete").length, del + 1, "Discordの通知が消えていない");
+  });
+  test("自動で完了にしない場合：担当者が対応中のお客さん／納品の時刻が記録されていない古い行", () => {
+    const o4 = submit({ contact: "g@h.com:pw44", requester: "四郎" });
+    handle("U4", o4.lineText);
+    env.run("adminSetStatus")("adminpw", o4.receiptNo, "代行中");
+    env.run("workerDeliver")("workerpw", o4.receiptNo);
+    const row = env.run("findOrderRow")(sheet(), o4.receiptNo);
+    env.run("upsertLineRecord")("U4", "", { status: "担当者待ち" });
+    sheet().getRange(row, 16).setValue(new Date(Date.now() - 48 * 3600000));
+    env.run("remindUnhandled")();
+    assert.strictEqual(env.run("normStatus")(sheet().getRange(row, 10).getValue()), "納品済", "担当者待ちなのに完了にした");
+    sheet().getRange(row, 16).setValue("");
+    env.run("upsertLineRecord")("U4", "", { status: "ボット対応" });
+    env.run("remindUnhandled")();
+    assert.strictEqual(env.run("normStatus")(sheet().getRange(row, 10).getValue()), "納品済", "時刻がないのに完了にした");
+    assert.notStrictEqual(sheet().getRange(row, 16).getValue(), "", "時刻を記録していない");
+  });
+}
+
+// ---------------- 3b. 口コミと実績 ----------------
+{
+  const env = makeEnv(BASE_PROPS);
+  env.run("setup")();
+  const handle = (uid, text) => { env.run("BOT_STATE").replied = false; env.run("handleTextMessage")(uid, "rt", text); };
+  const lastReply = () => { const c = lineCalls(env, "reply"); return c.length ? c[c.length - 1].body.messages[0].text : ""; };
+  const reviews = () => env.sheets["口コミ"].getRange(2, 1, Math.max(env.sheets["口コミ"].getLastRow() - 1, 1), 5).getValues().filter(r => r[2]);
+  const finish = (uid, contact) => {
+    const o = env.run("submitOrder")({ selected: ["BAN保証"], requester: "花子", amount: 300, contact, note: "", image: IMG });
+    handle(uid, o.lineText);
+    env.run("adminSetStatus")("adminpw", o.receiptNo, "代行中");
+    env.run("workerDeliver")("workerpw", o.receiptNo);
+    handle(uid, "ありがとうございました！");
+    return o;
+  };
+
+  test("完了のメッセージで感想をお願いし、返してくれた感想は口コミシートに「未確認」でたまる（AIは使わない）", () => {
+    finish("R1", "r1@x.com:pw");
+    assert.ok(lastReply().indexOf("感想") >= 0, "完了のメッセージに感想のお願いがない");
+    const a = aiCalls(env).length, d = discordCalls(env).length;
+    handle("R1", "とても早くて助かりました！また頼みます");
+    assert.ok(lastReply().indexOf("感想ありがとう") >= 0, lastReply());
+    assert.strictEqual(aiCalls(env).length, a);
+    const r = reviews();
+    assert.strictEqual(r.length, 1); assert.strictEqual(r[0][2], "とても早くて助かりました！また頼みます", "書いたままの文字で残す"); assert.strictEqual(r[0][3], "未確認");
+    assert.ok(discordCalls(env).length > d, "Discordに口コミのお知らせがない");
+    handle("R1", "もう一回送ってみる感想です");
+    assert.strictEqual(reviews().length, 1, "感想は1回だけ受け付ける");
+  });
+  test("完了のあとでも、質問・不満・パスワードは口コミにしない", () => {
+    finish("R2", "r2@x.com:pw");
+    env.aiQueue.push({ text: JSON.stringify({ reply: "確認します", need_staff: true, closing: false, summary: "未反映" }) });
+    handle("R2", "まだ反映されてないみたいです");
+    env.aiQueue.push({ text: JSON.stringify({ reply: "はい", need_staff: false, closing: false, summary: "質問" }) });
+    handle("R2", "次はいつ頼めますか？");
+    handle("R2", "パスワードは abc12345 です");
+    assert.strictEqual(reviews().filter(r => r[4] === "R2").length, 0);
+    assert.ok(JSON.stringify(env.sheets["口コミ"].data).indexOf("abc12345") < 0);
+  });
+  test("「実績」ボタン：以前の実績の件数（PAST_DONE_COUNT）と、画像のリンク（GALLERY_URL）を出せる", () => {
+    const e2 = makeEnv(Object.assign({}, BASE_PROPS, { PAST_DONE_COUNT: " 1000 ", GALLERY_URL: "https://drive.example/folder" }));
+    e2.run("setup")();
+    const r = e2.run("matchFixedReply")("実績");
+    assert.ok(r.indexOf("1,000件") >= 0 && r.indexOf("https://drive.example/folder") >= 0, r);
+    const e3 = makeEnv(Object.assign({}, BASE_PROPS, { PAST_DONE_COUNT: "abc", GALLERY_URL: "javascript:alert(1)" }));
+    e3.run("setup")();
+    const r3 = e3.run("matchFixedReply")("実績");
+    assert.ok(r3.indexOf("javascript") < 0 && r3.indexOf("NaN") < 0, r3);
+  });
+  test("URLや連絡先が入った口コミは、自動で「NG」（宣伝・いたずら対策）", () => {
+    finish("R4", "r4@x.com:pw");
+    handle("R4", "最高でした！こっちも見てね https://spam.example");
+    const r = reviews().filter(x => x[4] === "R4");
+    assert.strictEqual(r.length, 1); assert.strictEqual(r[0][3], "NG");
+  });
+  test("感想の受付は3日まで", () => {
+    finish("R3", "r3@x.com:pw");
+    env.docStore["review_R3"] = String(Date.now() - 4 * 86400000);
+    env.aiQueue.push({ text: JSON.stringify({ reply: "どういたしまして", need_staff: false, closing: false, summary: "x" }) });
+    handle("R3", "前回はありがとうございました、助かりました");
+    assert.strictEqual(reviews().filter(r => r[4] === "R3").length, 0);
+  });
+  test("「実績」ボタン：OKにした口コミだけを新しい順に出す／件数は決めた数以上から", () => {
+    const fixed = (t) => env.run("matchFixedReply")(t);
+    assert.ok(fixed("実績").indexOf("集めています") >= 0, "OKがまだないのに口コミを出した");
+    env.sheets["口コミ"].getRange(2, 4).setValue("OK");
+    let r = fixed("実績");
+    assert.ok(r.indexOf("とても早くて助かりました") >= 0 && r.indexOf("お名前は伏せています") >= 0, r);
+    assert.ok(r.indexOf("花子") < 0, "名前を出している");
+    assert.ok(r.indexOf("代行実績") < 0, "件数が少ないうちは出さない");
+    env.run("REVIEW").MIN_COUNT_TO_SHOW = 2;
+    r = fixed("口コミ");
+    assert.ok(/これまでの代行実績\n　\d+件/.test(r), r);
+    env.sheets["口コミ"].appendRow([new Date(), "x", "NGの口コミ", "NG", "Rx"]);
+    assert.ok(fixed("実績").indexOf("NGの口コミ") < 0);
+  });
+}
+
+// ---------------- 4. AI・守り ----------------
+{
+  const env = makeEnv(BASE_PROPS);
+  env.run("setup")();
+  const handle = (uid, text) => { env.run("BOT_STATE").replied = false; env.run("handleTextMessage")(uid, "rt", text); };
+  const lastReply = () => { const c = lineCalls(env, "reply"); return c.length ? c[c.length - 1].body.messages[0].text : ""; };
+  const ai = (o) => env.aiQueue.push({ text: JSON.stringify(Object.assign({ reply: "OKです", need_staff: false, closing: false, summary: "要約" }, o)) });
+
+  test("IDやパスワードは、AIに送らず・記録にも会話の記憶にも残さない", () => {
+    handle("U9", "パスワードはabc12345XYZです");
+    assert.strictEqual(aiCalls(env).length, 0);
+    assert.ok(lastReply().indexOf("注文フォームから\nお送りください") >= 0, lastReply());
+    const everything = JSON.stringify(env.sheets) + JSON.stringify(env.cacheStore) + JSON.stringify(discordCalls(env));
+    assert.ok(everything.indexOf("abc12345XYZ") < 0, "どこかに残っている");
+    handle("U9", "taro@example.com Pass9999zz");
+    assert.ok((JSON.stringify(env.sheets) + JSON.stringify(env.cacheStore)).indexOf("Pass9999zz") < 0);
+  });
+  test("AIには、マニュアルとルールを渡し、会話は直近10往復までにする", () => {
+    for (let i = 0; i < 14; i++) { ai({}); handle("U8", "質問その" + i); }
+    const calls = aiCalls(env);
+    const last = calls[calls.length - 1].body;
+    assert.strictEqual(last.model, "claude-sonnet-5-5");
+    assert.ok(last.system[0].text.indexOf("【マニュアル】") >= 0 && last.system[0].text.indexOf("コイン指定") >= 0);
+    assert.ok(last.messages.length <= 21, "履歴が長すぎる: " + last.messages.length);
+    assert.strictEqual(last.messages[0].role, "user");
+    assert.strictEqual(last.messages[last.messages.length - 1].content, "質問その13");
+    assert.strictEqual(calls[0].headers["x-api-key"], "KEY"); // キーは設定から読む
+  });
+  test("コードの中に、秘密の文字列が書かれていない", () => {
+    const src = ["Code.gs", "Bot.gs", "Manual.gs", "FixedReplies.gs", "AiStaff.gs", "form.html", "admin.html", "worker.html", "fix.html"]
+      .map(f => fs.readFileSync(path.join(root, f), "utf8")).join("\n");
+    assert.ok(!/discord(app)?\.com\/api\/webhooks\/\d/.test(src), "Discord URLが書かれている");
+    assert.ok(!/sk-ant-/.test(src), "APIキーが書かれている");
+    assert.ok(!/Bearer [A-Za-z0-9+\/=_-]{20,}/.test(src), "LINEトークンが書かれている");
+  });
+  test("マニュアルにないこと（AIが need_staff）→「担当者から連絡します」＋Discord通知＋記録", () => {
+    const n = discordCalls(env).length;
+    ai({ reply: "確認します。", need_staff: true, summary: "返金希望" });
+    handle("U7", "返金してください");
+    assert.ok(lastReply().indexOf("担当者から連絡します") >= 0);
+    assert.ok(discordCalls(env).length > n);
+    const row = env.sheets["LINE記録"].getRange(2, 1, env.sheets["LINE記録"].getLastRow() - 1, 6).getValues().find(r => r[5] === "U7");
+    assert.strictEqual(row[3], "担当者待ち"); assert.strictEqual(row[2], "返金希望");
+  });
+  test("AIがエラーのときも、お客さんには「担当者から連絡します」と返し、担当者に知らせる", () => {
+    const n = discordCalls(env).length;
+    env.aiQueue.push({ error: 529 });
+    handle("U6", "納期はいつですか");
+    assert.ok(lastReply().indexOf("担当者から連絡します") >= 0);
+    assert.ok(discordCalls(env).length > n);
+  });
+  test("AIがJSON以外を返しても、そのまま送らず担当者に回す", () => {
+    env.aiQueue.push({ text: "どうぞご自由に（JSONではない文章）" });
+    handle("U5", "どうなってますか");
+    assert.ok(lastReply().indexOf("担当者から連絡します") >= 0);
+    assert.ok(lastReply().indexOf("ご自由に") < 0);
+  });
+  test("AIが長い1行で返事しても、お客さんには改行し直して届く", () => {
+    ai({ reply: "ご連絡ありがとうございます。どのようなご用件でしょうか？ご注文はメニューの「注文」から注文フォームをご利用ください。", summary: "用件" });
+    handle("U12", "こんにちは");
+    const r = lastReply();
+    assert.ok(r.split("\n").length >= 4, "改行されていない: " + r);
+    assert.strictEqual(r.replace(/\n/g, ""), "ご連絡ありがとうございます。どのようなご用件でしょうか？ご注文はメニューの「注文」から注文フォームをご利用ください。");
+  });
+  test("納品前の「ありがとう」では完了にしない（AIを使わず定型で返す）", () => {
+    const n = aiCalls(env).length;
+    handle("U3", "ありがとう");
+    assert.strictEqual(aiCalls(env).length, n);
+    assert.ok(lastReply().indexOf("こちらこそ") >= 0, lastReply());
+    assert.ok(lastReply().indexOf("完了です") < 0);
+  });
+  test("担当者待ちの間は、ボットがAIで返事をせず、担当者に知らせる／対応済にすると再開する", () => {
+    const n = aiCalls(env).length, d = discordCalls(env).length;
+    handle("U7", "いつ連絡もらえますか"); // U7 は上のテストで「担当者待ち」になっている
+    assert.strictEqual(aiCalls(env).length, n, "担当者待ちなのにAIを呼んだ");
+    assert.ok(lastReply().indexOf("担当者が確認中") >= 0, lastReply());
+    assert.ok(discordCalls(env).length > d, "担当者に知らせていない");
+    assert.ok(discordCalls(env).pop().body.content.indexOf("いつ連絡もらえますか") >= 0);
+    handle("U7", "料金"); // 決まった返事は、担当者待ちでも返る
+    assert.ok(lastReply().indexOf("料金表") >= 0);
+
+    const inq = env.run("adminInquiries")("adminpw");
+    assert.ok(inq.ok && inq.list.some(q => q.uid === "U7" && q.summary === "返金希望"), JSON.stringify(inq));
+    assert.strictEqual(env.run("adminInquiries")("bad").ok, false);
+    assert.strictEqual(env.run("adminResolveInquiry")("bad", "U7").ok, false);
+    const p = lineCalls(env, "push").length;
+    assert.strictEqual(env.run("adminSendLineInquiry")("adminpw", "U7", "確認しました、返金します").ok, true);
+    assert.strictEqual(lineCalls(env, "push")[p].body.to, "U7");
+    assert.strictEqual(env.run("adminResolveInquiry")("adminpw", "U7").ok, true);
+    assert.ok(!env.run("adminInquiries")("adminpw").list.some(q => q.uid === "U7"));
+
+    ai({ reply: "はい、承ります。", summary: "再開" });
+    handle("U7", "別の質問です");
+    assert.strictEqual(aiCalls(env).length, n + 1, "対応済にしたのにAIが再開しない");
+    assert.ok(lastReply().indexOf("承ります") >= 0);
+  });
+  test("AIの使いすぎを止める（1人1時間30回まで）", () => {
+    const n = aiCalls(env).length;
+    for (let i = 0; i < 30; i++) { ai({}); handle("U2", "質問" + i); }
+    assert.strictEqual(aiCalls(env).length, n + 30);
+    handle("U2", "質問31");
+    assert.strictEqual(aiCalls(env).length, n + 30, "上限を超えてもAIを呼んだ");
+    assert.ok(lastReply().indexOf("混み合って") >= 0, lastReply());
+    handle("U2", "料金"); // 決まった返事は使える
+    assert.ok(lastReply().indexOf("料金表") >= 0);
+  });
+  test("Discordの通知に、お客さんの文章の@が入っても、全員宛メンションにならない", () => {
+    env.aiQueue.push({ error: 500 });
+    handle("U4", "@everyone 助けて");
+    const last = discordCalls(env).filter(c => c.body && c.body.content).pop();
+    assert.ok(last.body.content.indexOf("@everyone") < 0);
+  });
+}
+
+// ---------------- 4b. いたずら・嫌がらせ対策 ----------------
+{
+  const env = makeEnv(BASE_PROPS);
+  env.run("setup")();
+  const submit = (extra) => env.run("submitOrder")(Object.assign({ selected: ["BAN保証"], requester: "太郎", amount: 300, contact: "x@y.com:pw" + Math.random(), note: "", image: IMG }, extra || {}));
+  const handle = (uid, text) => { env.run("BOT_STATE").replied = false; env.run("handleTextMessage")(uid, "rt", text); };
+  const lastReply = () => { const c = lineCalls(env, "reply"); return c.length ? c[c.length - 1].body.messages[0].text : ""; };
+
+  test("フォーム：長すぎる入力・大きすぎる写真・ありえない金額は受け付けない", () => {
+    assert.strictEqual(submit({ requester: "あ".repeat(51) }).ok, false);
+    assert.strictEqual(submit({ contact: "a".repeat(301) }).ok, false);
+    assert.strictEqual(submit({ note: "あ".repeat(501) }).ok, false);
+    assert.strictEqual(submit({ amount: 1000000 }).ok, false);
+    assert.strictEqual(submit({ image: { dataUrl: "data:image/png;base64," + "A".repeat(7000001) } }).ok, false);
+  });
+  test("フォーム：金額が商品の合計より少ないと、Discordで目立たせる", () => {
+    const o = submit({ selected: ["プレミアムBOX完売"], amount: 100 });
+    assert.strictEqual(o.ok, true);
+    const d = discordCalls(env).filter(c => c.body && c.body.embeds).pop();
+    assert.ok(JSON.stringify(d.body).indexOf("合計（¥1,500）より少ない") >= 0, JSON.stringify(d.body));
+    const o2 = submit({ selected: ["ツムレベルMAX 1体"], amount: 900, note: "3体" });
+    const d2 = discordCalls(env).filter(c => c.body && c.body.embeds).pop();
+    assert.ok(JSON.stringify(d2.body).indexOf("より少ない") < 0, "多いのは正しい（複数体）");
+  });
+  test("フォーム：10分に20件を超える注文は、一時的に止めて管理者に知らせる", () => {
+    for (let i = 0; i < 25; i++) submit();
+    const r = submit();
+    assert.strictEqual(r.ok, false);
+    assert.ok(r.message.indexOf("集中") >= 0);
+    assert.strictEqual(discordCalls(env).filter(c => c.body && c.body.content && c.body.content.indexOf("注文が20件を超えた") >= 0).length, 1, "知らせは1回だけ");
+  });
+  test("管理ページ：パスワードの総当たりは、20回でロックして知らせる（ロック中は正しくても入れない）", () => {
+    assert.strictEqual(env.run("adminList")("adminpw").ok, true);
+    for (let i = 0; i < 20; i++) env.run("adminList")("guess" + i);
+    assert.strictEqual(env.run("adminList")("adminpw").ok, false, "ロックされていない");
+    assert.ok(discordCalls(env).some(c => c.body && c.body.content && c.body.content.indexOf("管理ページのパスワード間違い") >= 0));
+    assert.strictEqual(env.run("workerList")("workerpw").ok, true, "代行者ページは別にロックされる");
+    delete env.cacheStore["lock_ADMIN_KEY"];
+    assert.strictEqual(env.run("adminList")("adminpw").ok, true, "ロックが解けたら入れる");
+  });
+  test("LINE：受付番号・コードの間違いが5回続いたら、1時間受け付けない（総当たり対策）", () => {
+    delete env.cacheStore["orders_10m"]; // 上のテストで止まった受付を元に戻す
+    const o = submit({ contact: "link@test.com:pw" });
+    assert.strictEqual(o.ok, true);
+    for (let i = 0; i < 5; i++) handle("Ubad", "受付番号 " + o.receiptNo + " コード 00000" + i);
+    handle("Ubad", o.lineText);
+    assert.ok(lastReply().indexOf("止めています") >= 0, lastReply());
+    const row = env.run("findOrderRow")(env.sheets["受付"], o.receiptNo);
+    assert.strictEqual(String(env.sheets["受付"].getRange(row, 14).getValue()), "", "ロック中なのに結びついた");
+    handle("Ugood", o.lineText);
+    assert.ok(lastReply().indexOf("受付を確認しました") >= 0, "ほかの人には影響しない");
+  });
+  test("担当者待ちの人が連投しても、Discordへの連絡は10分に1回まで", () => {
+    env.run("upsertLineRecord")("Uspam", "", { status: "担当者待ち" });
+    const n = discordCalls(env).length;
+    for (let i = 0; i < 10; i++) handle("Uspam", "早くしろ" + i);
+    assert.strictEqual(discordCalls(env).length, n + 1);
+  });
+  test("画像の連投も、Discordへの連絡は10分に1回まで", () => {
+    const post = (id) => env.run("doPost")({ parameter: { key: "secretkey" }, postData: { contents: JSON.stringify({ events: [{ type: "message", replyToken: "r", webhookEventId: id, source: { type: "user", userId: "Uimg" }, message: { type: "image", id } }] }) } });
+    const n = discordCalls(env).length;
+    for (let i = 0; i < 5; i++) post("img" + i);
+    assert.strictEqual(discordCalls(env).length, n + 1);
+  });
+  test("「無視する」にした人には、ボットが一切反応しない（AIも通知も使わない）", () => {
+    env.run("upsertLineRecord")("Utroll", "", { status: "担当者待ち" });
+    assert.strictEqual(env.run("adminIgnoreInquiry")("bad", "Utroll").ok, false);
+    assert.strictEqual(env.run("adminIgnoreInquiry")("adminpw", "Utroll").ok, true);
+    const r = lineCalls(env, "reply").length, d = discordCalls(env).length, a = aiCalls(env).length;
+    handle("Utroll", "料金"); handle("Utroll", "ばか");
+    env.run("doPost")({ parameter: { key: "secretkey" }, postData: { contents: JSON.stringify({ events: [{ type: "message", replyToken: "r", webhookEventId: "tr1", source: { type: "user", userId: "Utroll" }, message: { type: "image", id: "tr1" } }] }) } });
+    assert.strictEqual(lineCalls(env, "reply").length, r);
+    assert.strictEqual(discordCalls(env).length, d);
+    assert.strictEqual(aiCalls(env).length, a);
+    assert.ok(!env.run("adminInquiries")("adminpw").list.some(q => q.uid === "Utroll"), "担当者待ちの一覧から消える");
+  });
+}
+
+// ---------------- 5. LINEからの入口 ----------------
+{
+  const mk = (extra) => makeEnv(Object.assign({}, BASE_PROPS, extra || {}));
+  const post = (env, key, events) => env.run("doPost")({ parameter: key === null ? {} : { key }, postData: { contents: JSON.stringify({ events }) } });
+  const msg = (uid, text, id) => ({ type: "message", replyToken: "rt", webhookEventId: id, source: { type: "user", userId: uid }, message: { type: "text", id, text } });
+
+  test("合言葉（?key=）が違うと、何も処理しない", () => {
+    const env = mk(); env.run("setup")();
+    post(env, "wrong", [msg("U1", "料金", "e1")]); post(env, null, [msg("U1", "料金", "e2")]);
+    assert.strictEqual(lineCalls(env, "reply").length, 0);
+  });
+  test("合言葉が合えば返信する／LINEの「検証」（空の通知）も通る／同じ通知は2回処理しない", () => {
+    const env = mk(); env.run("setup")();
+    assert.strictEqual(post(env, "secretkey", []).text, "OK");
+    post(env, "secretkey", [msg("U1", "料金", "e3")]);
+    post(env, "secretkey", [msg("U1", "料金", "e3")]);
+    assert.strictEqual(lineCalls(env, "reply").length, 1);
+    assert.ok(lineCalls(env, "reply")[0].body.messages[0].text.indexOf("料金表") >= 0);
+    assert.strictEqual(lineCalls(env, "reply")[0].headers.Authorization, "Bearer TOKEN");
+  });
+  test("テストモード：自分以外には返事しない／「ID確認」でIDを教える", () => {
+    const env = mk({ TEST_MODE: "on", TEST_USER_ID: "Umine" }); env.run("setup")();
+    post(env, "secretkey", [msg("Uother", "料金", "e4")]);
+    assert.strictEqual(lineCalls(env, "reply").length, 0);
+    post(env, "secretkey", [msg("Uother", "ID確認", "e5")]);
+    assert.ok(lineCalls(env, "reply")[0].body.messages[0].text.indexOf("Uother") >= 0);
+    post(env, "secretkey", [msg("Umine", "料金", "e6")]);
+    assert.strictEqual(lineCalls(env, "reply").length, 2);
+  });
+  test("テストモードは「ON」「オン」「 on 」など、書き方の違いがあっても効く", () => {
+    ["ON", "オン", " on ", "ｏｎ"].forEach(v => {
+      const env = mk({ TEST_MODE: v, TEST_USER_ID: " Umine " }); env.run("setup")();
+      post(env, "secretkey", [msg("Uother", "はい", "x" + v)]);
+      assert.strictEqual(lineCalls(env, "reply").length, 0, "他人に返事した: " + JSON.stringify(v));
+      post(env, "secretkey", [msg("Umine", "料金", "y" + v)]);
+      assert.strictEqual(lineCalls(env, "reply").length, 1, "自分に返事しない: " + JSON.stringify(v));
+      env.run("checkSecrets")();
+      assert.ok(env.logs.join("\n").indexOf("【テストモード】") >= 0);
+    });
+    const env = mk(); env.run("checkSecrets")();
+    assert.ok(env.logs.join("\n").indexOf("【本番モード】") >= 0);
+  });
+  test("本番モードでは「ID確認」は特別扱いしない", () => {
+    const env = mk(); env.run("setup")();
+    env.aiQueue.push({ text: JSON.stringify({ reply: "はい", need_staff: false, closing: false, summary: "x" }) });
+    post(env, "secretkey", [msg("U1", "ID確認", "e7")]);
+    assert.ok(lineCalls(env, "reply")[0].body.messages[0].text.indexOf("あなたのID") < 0);
+  });
+  test("スタンプは無視／画像は担当者に知らせる", () => {
+    const env = mk(); env.run("setup")();
+    post(env, "secretkey", [{ type: "message", replyToken: "r", webhookEventId: "s1", source: { type: "user", userId: "U1" }, message: { type: "sticker", id: "s1" } }]);
+    assert.strictEqual(lineCalls(env, "reply").length, 0);
+    post(env, "secretkey", [{ type: "message", replyToken: "r", webhookEventId: "i1", source: { type: "user", userId: "U1" }, message: { type: "image", id: "i1" } }]);
+    assert.strictEqual(lineCalls(env, "reply").length, 1);
+    assert.ok(discordCalls(env).length >= 1);
+  });
+  test("グループなど、1対1以外のトークは無視する", () => {
+    const env = mk(); env.run("setup")();
+    post(env, "secretkey", [{ type: "message", replyToken: "r", webhookEventId: "g1", source: { type: "group", userId: "U1", groupId: "G" }, message: { type: "text", id: "g1", text: "料金" } }]);
+    assert.strictEqual(lineCalls(env, "reply").length, 0);
+  });
+  test("APP_URL を設定すると、リンクにそのURLを使う", () => {
+    const env = mk({ APP_URL: "https://script.google.com/macros/s/REAL/exec" });
+    assert.strictEqual(env.run("appUrl")(), "https://script.google.com/macros/s/REAL/exec");
+    assert.strictEqual(mk().run("appUrl")(), "https://script.google.com/macros/s/TEST/exec");
+  });
+  test("鍵の前後に空白や改行が入っていても、正しく使える", () => {
+    const env = makeEnv(Object.assign({}, BASE_PROPS, { CLAUDE_API_KEY: "  KEY\n", LINE_TOKEN: "TOKEN \n" }));
+    env.run("setup")();
+    env.aiQueue.push({ text: JSON.stringify({ reply: "はい", need_staff: false, closing: false, summary: "x" }) });
+    env.run("BOT_STATE").replied = false; env.run("handleTextMessage")("U1", "rt", "こんにちは");
+    assert.strictEqual(aiCalls(env)[0].headers["x-api-key"], "KEY");
+    assert.strictEqual(lineCalls(env, "reply")[0].headers.Authorization, "Bearer TOKEN");
+  });
+  test("checkSecrets：足りない設定を教える（中身は表示しない）", () => {
+    const env = makeEnv({ LINE_TOKEN: "SECRETVALUE" });
+    env.run("checkSecrets")();
+    const log = env.logs.join("\n");
+    assert.ok(log.indexOf("未設定 CLAUDE_API_KEY") >= 0 && log.indexOf("OK    LINE_TOKEN") >= 0);
+    assert.ok(log.indexOf("未設定 LINE_BASIC_ID") >= 0, "LINE_BASIC_ID がないとボタンが出ないので必須");
+    assert.ok(log.indexOf("SECRETVALUE") < 0);
+  });
+}
+
+// ---------------- 5b. AI店長の週1朝礼 ----------------
+{
+  const DAY = 86400000;
+  const mkEnv = () => { const env = makeEnv(BASE_PROPS); env.run("setup")(); return env; };
+  // 受付シートに、日時を指定して注文の行を入れる
+  const addRow = (env, o) => env.sheets["受付"].appendRow([o.t, "T-" + Math.random(), "客", o.menu, 1, o.amount, o.contact, "", "", o.status,
+    "", "tok", "", o.line || "", "", o.delivered || ""]);
+  const seed = (env) => {
+    const now = Date.now();
+    addRow(env, { t: new Date(now - 10 * DAY), menu: "BAN保証", amount: 300, contact: "a@x.com:pw", status: "完了", line: "U1" });
+    addRow(env, { t: new Date(now - 3 * DAY), menu: "プレイヤーレベルMAX", amount: 200, contact: "c@x.com:pw", status: "代行中", line: "U1" });
+    addRow(env, { t: new Date(now - 2 * DAY), menu: "コイン指定（5万〜2億）, BAN保証", amount: 500, contact: "A@x.com:pw2", status: "完了",
+      delivered: new Date(now - 2 * DAY + 3 * 3600000) });
+    addRow(env, { t: new Date(now - 1 * DAY), menu: "コイン指定（5万〜2億）", amount: 300, contact: "b@x.com:pw", status: "納品済", line: "U2",
+      delivered: new Date(now - 1 * DAY + 5 * 3600000) });
+  };
+
+  test("setup で、毎週月曜の朝礼が予約される", () => {
+    const env = mkEnv();
+    assert.ok(env.triggers.indexOf("weeklyMeeting") >= 0, JSON.stringify(env.triggers));
+    assert.ok(env.sheets["担当者行きログ"] && env.sheets["AI店長メモ"]);
+  });
+  test("分析の数字は、プログラムが正確に数える（AIは使わない）", () => {
+    const env = mkEnv(); seed(env);
+    const s = env.run("weeklyStats")(new Date());
+    assert.strictEqual(s.orders, 3); assert.strictEqual(s.revenue, 1000);
+    assert.strictEqual(s.prevOrders, 1); assert.strictEqual(s.prevRevenue, 300);
+    assert.strictEqual(s.repeatCustomers, 2, "同じゲームアカウント（大文字小文字ちがい）・同じLINEはリピート");
+    assert.strictEqual(s.newCustomers, 1); assert.strictEqual(s.repeatRate, 67);
+    assert.strictEqual(s.avgWaitHours, 4);
+    assert.strictEqual(s.topItems[0].name, "コイン指定（5万〜2億）"); assert.strictEqual(s.topItems[0].count, 2);
+    assert.strictEqual(s.pendingNow, 1);
+    assert.strictEqual(aiCalls(env).length, 0);
+  });
+  test("担当者行きは記録される（IDやパスワードらしきものは記録しない）", () => {
+    const env = mkEnv();
+    env.run("notifyStaff")("花子", [], "返金してほしいです", "テスト");
+    env.run("notifyStaff")("太郎", [], "パスワードは Secret123x です", "テスト");
+    const log = JSON.stringify(env.sheets["担当者行きログ"].data);
+    assert.ok(log.indexOf("返金してほしいです") >= 0);
+    assert.ok(log.indexOf("Secret123x") < 0, "パスワードが記録された");
+  });
+  test("朝礼：数字＋4人のAIスタッフの報告が、Discordに届いてシートにも残る", () => {
+    const env = mkEnv(); seed(env);
+    env.run("notifyStaff")("花子", [], "PayPay以外で払えますか", "マニュアルにない内容");
+    env.sheets["AI店長メモ"].getRange(2, 2).setValue("11/10 新ツム追加");
+    ["✅ 注文が増えた", "❓ よくある質問：支払い方法", "🐦 Xの投稿案", "📝 今週やること\n1. 支払い方法を足す"].forEach(t => env.aiQueue.push({ text: t }));
+    const d = discordCalls(env).length;
+    env.run("weeklyMeeting")();
+    const calls = aiCalls(env);
+    assert.strictEqual(calls.length, 4);
+    calls.forEach(c => { assert.strictEqual(c.body.max_tokens, 1500); assert.ok(c.body.system[0].text.indexOf("【マニュアル】") >= 0); });
+    assert.ok(calls[1].body.messages[0].content.indexOf("PayPay以外で払えますか") >= 0, "改善係に担当者行きの質問が渡っていない");
+    assert.ok(calls[2].body.messages[0].content.indexOf("11/10 新ツム追加") >= 0, "広報係にメモが渡っていない");
+    assert.ok(calls[3].body.messages[0].content.indexOf("🐦 Xの投稿案") >= 0, "店長にスタッフの報告が渡っていない");
+    const msgs = discordCalls(env).slice(d).map(c => c.body.content);
+    assert.strictEqual(msgs.length, 4);
+    assert.ok(msgs[0].indexOf("今週の朝礼") >= 0 && msgs[0].indexOf("注文：3件") >= 0 && msgs[0].indexOf("今週やること") >= 0, msgs[0]);
+    assert.ok(msgs[1].indexOf("分析係") >= 0 && msgs[2].indexOf("改善係") >= 0 && msgs[3].indexOf("広報係") >= 0);
+    assert.ok(JSON.stringify(env.sheets["AI朝礼"].data).indexOf("今週の朝礼") >= 0, "シートに残っていない");
+  });
+  test("朝礼：係ごとのチャンネルを設定すると、それぞれに届く／長い報告は分けて送る", () => {
+    const env = makeEnv(Object.assign({}, BASE_PROPS, { DISCORD_MANAGER: "https://discord.test/mgr", DISCORD_ANALYST: "https://discord.test/ana",
+      DISCORD_IMPROVER: "https://discord.test/imp", DISCORD_PROMOTER: "https://discord.test/pro" }));
+    env.run("setup")(); seed(env);
+    env.run("notifyStaff")("花子", [], "質問です", "テスト");
+    ["分析", "改善", ("広報の長い案\n").repeat(300), "やること"].forEach(t => env.aiQueue.push({ text: t }));
+    env.run("weeklyMeeting")();
+    const to = (u) => discordCalls(env).filter(c => c.url === u).map(c => c.body.content);
+    assert.ok(to("https://discord.test/mgr")[0].indexOf("今週の朝礼") >= 0);
+    assert.ok(to("https://discord.test/ana")[0].indexOf("分析係") >= 0);
+    assert.ok(to("https://discord.test/imp")[0].indexOf("改善係") >= 0);
+    const pro = to("https://discord.test/pro");
+    assert.ok(pro.length >= 2, "長い報告が分かれていない");
+    pro.forEach(c => assert.ok(c.length <= 1900));
+    assert.strictEqual(pro.join("\n").split("広報の長い案").length - 1, 300, "分けたときに文章が欠けた");
+  });
+  test("朝礼：担当者行きがなければ、改善係はAIを使わない／AIが失敗しても数字は届く", () => {
+    const env = mkEnv(); seed(env);
+    env.aiQueue.push({ error: 500 }); env.aiQueue.push({ error: 500 }); env.aiQueue.push({ error: 500 });
+    const d = discordCalls(env).length;
+    env.run("weeklyMeeting")();
+    assert.strictEqual(aiCalls(env).length, 3, "改善係がAIを呼んだ");
+    const msgs = discordCalls(env).slice(d).map(c => c.body.content);
+    assert.ok(msgs[0].indexOf("注文：3件") >= 0 && msgs[0].indexOf("AIが作れませんでした") >= 0, msgs[0]);
+    assert.ok(msgs[2].indexOf("担当者行きになった質問はありませんでした") >= 0);
+  });
+}
+
+// ---------------- 5c. 広報係：ツムツムの予定をネットで調べる ----------------
+{
+  const iso = (d) => { const j = new Date(d.getTime() + 9 * 3600000); return j.getUTCFullYear() + "-" + String(j.getUTCMonth() + 1).padStart(2, "0") + "-" + String(j.getUTCDate()).padStart(2, "0"); };
+  const day = (n) => iso(new Date(Date.now() + n * 86400000));
+  const mk = (extra) => { const env = makeEnv(Object.assign({}, BASE_PROPS, extra || {})); env.run("setup")(); return env; };
+  const answer = (items) => ({ raw: { stop_reason: "end_turn", content: [
+    { type: "server_tool_use", id: "s1", name: "web_search", input: { query: "ツムツム 新ツム" } },
+    { type: "web_search_tool_result", tool_use_id: "s1", content: [{ type: "web_search_result", url: "https://official.example/news", title: "お知らせ" }] },
+    { type: "text", text: JSON.stringify(items), citations: [{ type: "web_search_result_location", url: "https://official.example/news" }] }
+  ] } });
+
+  test("setup で、毎月1日と15日の調査が予約される", () => {
+    const env = mk();
+    assert.strictEqual(env.triggers.filter(t => t === "monthlyTsumSchedule").length, 2);
+  });
+  test("予定を調べて、シートとDiscord（広報係）に入れる／出典のないものは捨てる", () => {
+    const env = mk({ DISCORD_PROMOTER: "https://discord.test/pro" });
+    env.aiQueue.push(answer([
+      { start: day(3), end: day(20), title: "新ツム登場", detail: "〇〇ツム", source: "https://official.example/news" },
+      { start: day(1), end: "", title: "セレクトBOX更新", detail: "", source: "https://site.example/a" },
+      { start: day(5), end: "", title: "うわさ", detail: "出典なし", source: "" }
+    ]));
+    const items = env.run("monthlyTsumSchedule")();
+    assert.strictEqual(items.length, 2, "出典のないものを残した");
+    assert.strictEqual(items[0].title, "セレクトBOX更新", "日付の順になっていない");
+    const req = aiCalls(env).pop().body;
+    assert.strictEqual(req.tools[0].type, "web_search_20260209"); assert.strictEqual(req.tools[0].max_uses, 8);
+    assert.strictEqual(req.tools[0].user_location.country, "JP");
+    const rows = env.sheets["ツムツム予定"].getRange(2, 1, 2, 6).getValues();
+    assert.strictEqual(rows[1][2], "新ツム登場"); assert.strictEqual(rows[1][4], "https://official.example/news");
+    const msg = discordCalls(env).filter(c => c.url === "https://discord.test/pro").pop().body.content;
+    assert.ok(msg.indexOf("新ツム登場") >= 0 && msg.indexOf("公式の告知で確認") >= 0, msg);
+  });
+  test("調べものが長くて一時停止したら、続きから再開する", () => {
+    const env = mk();
+    env.aiQueue.push({ raw: { stop_reason: "pause_turn", content: [{ type: "server_tool_use", id: "s1", name: "web_search", input: { query: "q" } }] } });
+    env.aiQueue.push(answer([{ start: day(2), end: "", title: "イベント開始", detail: "", source: "https://official.example/e" }]));
+    const items = env.run("monthlyTsumSchedule")();
+    const calls = aiCalls(env);
+    assert.strictEqual(calls.length, 2);
+    const msgs = calls[1].body.messages;
+    assert.strictEqual(msgs[msgs.length - 1].role, "assistant", "一時停止した続きを送り返していない");
+    assert.strictEqual(items.length, 1);
+  });
+  test("まとめられなかったときや、検索が止められているときは、シートを変えずに知らせる", () => {
+    const env = mk();
+    env.sheets["ツムツム予定"].appendRow([day(1), "", "前の予定", "", "https://x.example", ""]);
+    env.aiQueue.push({ raw: { stop_reason: "end_turn", content: [{ type: "text", text: "見つかりませんでした" }] } });
+    assert.strictEqual(env.run("monthlyTsumSchedule")(), null);
+    env.aiQueue.push({ error: 400, errorBody: '{"error":{"message":"web search is not enabled for this organization"}}' });
+    assert.strictEqual(env.run("monthlyTsumSchedule")(), null);
+    assert.strictEqual(env.sheets["ツムツム予定"].getRange(2, 3).getValue(), "前の予定");
+    const last = discordCalls(env).pop().body.content;
+    assert.ok(last.indexOf("ネット検索") >= 0, last);
+  });
+  test("週1の広報係は、これから2週間の予定を使う（終わった予定・先すぎる予定は使わない）", () => {
+    const env = mk();
+    const sh = env.sheets["ツムツム予定"];
+    [[day(-10), day(-3), "終わったイベント"], [day(-2), day(5), "開催中のガチャ"], [day(4), "", "新ツム登場"], [day(30), "", "先すぎる予定"]]
+      .forEach(r => sh.appendRow([r[0].replace(/-/g, "/"), r[1].replace(/-/g, "/"), r[2], "", "https://x.example", ""]));
+    const ev = env.run("upcomingTsumEvents")(14).map(x => x.title);
+    assert.deepStrictEqual(ev, ["開催中のガチャ", "新ツム登場"]);
+    ["分析", "改善なし"].forEach(() => {});
+    env.aiQueue.push({ text: "分析" }); env.aiQueue.push({ text: "広報" }); env.aiQueue.push({ text: "店長" });
+    env.run("weeklyMeeting")();
+    const promo = aiCalls(env).find(c => c.body.messages[0].content.indexOf("これから2週間のツムツムの予定") >= 0);
+    assert.ok(promo && promo.body.messages[0].content.indexOf("新ツム登場") >= 0 && promo.body.messages[0].content.indexOf("先すぎる予定") < 0);
+  });
+}
+
+// ---------------- 6. スマホでの見え方 ----------------
+test("ボットが送る文章は、どの行もスマホの吹き出しに収まる（全角14文字ぶんまで）", () => {
+  const width = (line) => { // Bot.gs とは別に、ここで独立して計算する
+    const cs = Array.from(line); let w = 0;
+    cs.forEach((ch, i) => {
+      const c = ch.codePointAt(0);
+      if (c === 0xFE0F || c === 0x200D) return;
+      if (c === 0x20E3) return;
+      if (cs[i + 1] === "\uFE0F" || c >= 0x1F000 || (c >= 0x2300 && c <= 0x23FF) || (c >= 0x2600 && c <= 0x27BF) || (c >= 0x2B00 && c <= 0x2BFF)) { w += 2; return; }
+      w += (c < 0x80 || (c >= 0xFF61 && c <= 0xFF9F)) ? 0.5 : 1;
+    });
+    return w;
+  };
+  const env = makeEnv(BASE_PROPS);
+  const fixedTexts = Object.keys(env.run("FIXED_REPLIES")).map(k => env.run("matchFixedReply")(k)).filter(Boolean);
+  const texts = ALL_LINE_TEXTS.concat(fixedTexts);
+  assert.ok(texts.length > 30, "調べる文章が少なすぎる: " + texts.length);
+  const bad = [];
+  texts.forEach(t => t.split("\n").forEach(l => {
+    if (/https?:/.test(l) || /^U[0-9a-z]+$/i.test(l)) return; // URLとIDは切れないので除く
+    if (width(l) > 14) bad.push(l + "（" + width(l) + "）");
+  }));
+  assert.deepStrictEqual(Array.from(new Set(bad)), []);
+});
+
+console.log("\n" + results.join("\n"));
+console.log("\n" + passed + " 件OK / " + (results.length - passed) + " 件NG");
