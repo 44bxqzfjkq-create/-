@@ -12,6 +12,8 @@
  *   - AIは提案するだけです。マニュアルの変更や一斉送信は、あなたが確認してから行います
  *   - 今すぐ試すときは、関数 weeklyMeeting を選んで ▷実行
  *   - 「AI店長メモ」シートのB2に、来週の予定（新ツム・イベントなど）を書くと、広報係がそれに合わせます
+ *   - 広報係は毎月1日と15日に、ツムツムの予定（ガチャ・イベント）をネットで調べて「ツムツム予定」シートにまとめます
+ *     （今すぐ調べるときは、関数 monthlyTsumSchedule を ▷実行）
  *   - 係ごとにDiscordのチャンネルを分けるときは、スクリプト プロパティに
  *     DISCORD_MANAGER（店長）・DISCORD_ANALYST（分析係）・DISCORD_IMPROVER（改善係）・DISCORD_PROMOTER（広報係）
  *     の名前で、それぞれのWebhook URLを入れます（入れていない係は、通常チャンネルに届きます）
@@ -188,7 +190,10 @@ function promoterReport(stats) {
     "1.「🐦 Xの投稿案」を2本。それぞれ120文字以内。宣伝しすぎず、ツムツムをする人の役に立つ・共感する内容にして、最後に公式LINEへ軽く誘う。ハッシュタグは #ツムツム #ツムツム代行 など2〜3個。\n" +
     "2.「💬 LINE一斉送信の案」を1本。1行は全角14文字くらいまでで改行し、絵文字を2〜4個。\n" +
     "割引・キャンペーンは、メモに書いてあるときだけ使います。勝手に作りません。全体で700文字以内。",
-    "【来週の予定・イベント】" + (memo || "（特になし）") + "\n【先週の人気商品】" +
+    "【来週の予定・イベント（オーナーのメモ）】" + (memo || "（特になし）") +
+    "\n【これから2週間のツムツムの予定（AIがネットで調べたもの。日付と内容はこのとおりに使う）】\n" +
+    (function () { var ev = upcomingTsumEvents(14); return ev.length ? ev.map(function (x) { return "・" + x.start + (x.end ? "〜" + x.end : "") + " " + x.title + (x.detail ? "（" + x.detail + "）" : ""); }).join("\n") : "（なし）"; })() +
+    "\n【先週の人気商品】" +
     (stats.topItems.length ? stats.topItems.map(function (t) { return t.name; }).join("、") : "（データなし）"));
 }
 
@@ -238,4 +243,140 @@ function saveReport(now, text) {
     sh.setFrozenRows(1);
   }
   sh.appendRow([Utilities.formatDate(now, CONFIG.TIMEZONE, "yyyy/MM/dd HH:mm"), text]);
+}
+
+// ===================================================================
+// 📅 広報係：ツムツムの予定（ガチャ・イベント）を、毎月1日と15日にネットで調べる
+// ===================================================================
+// ・Claude のネット検索を使います（検索1回あたり約1.5円。1回の調査で最大8回まで）
+// ・調べた結果は「ツムツム予定」シートに入り、Discord（広報係）にも届きます
+// ・出典（URL）がない情報は捨てます。それでもAIの調べものなので、投稿前に公式の告知で確認してください
+var SCHEDULE = { SHEET: "ツムツム予定", MAX_SEARCHES: 8, MAX_TOKENS: 4000 };
+
+function scheduleSheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName(SCHEDULE.SHEET);
+  if (!sh) {
+    sh = ss.insertSheet(SCHEDULE.SHEET);
+    sh.getRange(1, 1, 1, 6).setValues([["開始日", "終了日", "内容", "くわしく", "出典URL", "調べた日"]]).setFontWeight("bold").setBackground("#f1f3f4");
+    sh.setFrozenRows(1);
+  }
+  return sh;
+}
+
+/** ネット検索つきで Claude に聞く（長い調べもので一時停止したら、続きから再開する）*/
+function callClaudeWithSearch(system, userText) {
+  var key = prop("CLAUDE_API_KEY");
+  if (!key) throw new Error("CLAUDE_API_KEY が未設定です");
+  var messages = [{ role: "user", content: userText }];
+  var texts = [], sources = [];
+  for (var round = 0; round < 4; round++) {
+    var res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
+      method: "post", contentType: "application/json",
+      headers: { "x-api-key": key, "anthropic-version": "2023-06-01" },
+      payload: JSON.stringify({
+        model: BOT.MODEL,
+        max_tokens: SCHEDULE.MAX_TOKENS,
+        system: system,
+        messages: messages,
+        tools: [{ type: "web_search_20260209", name: "web_search", max_uses: SCHEDULE.MAX_SEARCHES,
+                  user_location: { type: "approximate", country: "JP", timezone: "Asia/Tokyo" } }]
+      }),
+      muteHttpExceptions: true
+    });
+    var code = res.getResponseCode(), body = res.getContentText();
+    if (code !== 200) throw new Error("Claude API エラー " + code + " " + clip(body, 200));
+    var data = JSON.parse(body);
+    (data.content || []).forEach(function (b) {
+      if (b.type === "text") {
+        texts.push(b.text);
+        (b.citations || []).forEach(function (c) { if (c.url) sources.push(c.url); });
+      }
+      if (b.type === "web_search_tool_result" && Array.isArray(b.content)) {
+        b.content.forEach(function (r) { if (r.url) sources.push(r.url); });
+      }
+    });
+    if (data.stop_reason !== "pause_turn") break;
+    messages.push({ role: "assistant", content: data.content }); // 一時停止：そのまま送り返すと続きから再開する
+  }
+  return { text: texts.join(""), sources: sources };
+}
+
+function ymd(d) { return Utilities.formatDate(d, CONFIG.TIMEZONE, "yyyy/MM/dd"); }
+
+/** 調べた結果（JSON）を読み取る。出典のないものは捨てる */
+function parseSchedule(text) {
+  var s = String(text || ""), a = s.indexOf("["), b = s.lastIndexOf("]");
+  if (a < 0 || b <= a) return null;
+  var list;
+  try { list = JSON.parse(s.substring(a, b + 1)); } catch (e) { return null; }
+  if (!Array.isArray(list)) return null;
+  var normDate = function (v) {
+    var m = /(\d{4})[-\/年.](\d{1,2})[-\/月.](\d{1,2})/.exec(String(v || ""));
+    return m ? m[1] + "/" + ("0" + m[2]).slice(-2) + "/" + ("0" + m[3]).slice(-2) : "";
+  };
+  return list.map(function (x) {
+    return { start: normDate(x.start), end: normDate(x.end), title: clip(String(x.title || "").trim(), 80),
+             detail: clip(String(x.detail || "").trim(), 200), source: String(x.source || "").trim() };
+  }).filter(function (x) { return x.start && x.title && /^https?:\/\//.test(x.source); })
+    .sort(function (p, q) { return p.start < q.start ? -1 : p.start > q.start ? 1 : 0; })
+    .slice(0, 40);
+}
+
+/** 毎月1日と15日に動く：今月と来月はじめのツムツムの予定を調べる */
+function monthlyTsumSchedule() {
+  var now = new Date();
+  var to = new Date(now.getTime() + 45 * 86400000);
+  var system = [
+    "あなたは「" + SHOP_NAME + "」（ツムツム代行のお店）の広報係です。",
+    "スマホゲーム「LINE:ディズニー ツムツム」の、これからの予定をネットで調べます。",
+    "調べるもの：新ツムの登場、プレミアムBOX・セレクトBOX・ピックアップガチャの内容と期間、イベントの開始と終了、キャンペーン。",
+    "公式の告知（公式のお知らせ・公式SNS）を優先し、なければ攻略サイトなど信頼できるサイトを使います。",
+    "【守ること】",
+    "- 調べて確かめられたことだけを書きます。予想やうわさは書きません。",
+    "- 1つずつ、出典のURLを必ず付けます。URLがわからないものは書きません。",
+    "- 日付がはっきりしないものは書きません。",
+    "【出力】次の形のJSONの配列だけを出力します。前後に説明は書きません。",
+    '[{"start":"2026-11-01","end":"2026-11-30","title":"短い見出し（例：新ツム登場）","detail":"くわしい内容（ツムの名前など）","source":"https://..."}]'
+  ].join("\n");
+  var user = "今日は " + ymd(now) + " です。" + ymd(now) + " から " + ymd(to) + " までのツムツムの予定を調べてください。";
+
+  var result;
+  try { result = callClaudeWithSearch(system, user); }
+  catch (e) {
+    var msg = String(e && e.message ? e.message : e);
+    discordSend(prop("DISCORD_PROMOTER") || discordUrl(false), "📅 ツムツムの予定を調べられませんでした。\n" +
+      (/web search|not enabled/i.test(msg) ? "Claude Console の設定で、ネット検索（Web search）が止められている可能性があります。" : "理由：" + clip(msg, 200)));
+    return null;
+  }
+  var items = parseSchedule(result.text);
+  if (!items || !items.length) {
+    discordSend(prop("DISCORD_PROMOTER") || discordUrl(false), "📅 ツムツムの予定を、うまくまとめられませんでした（シートは前のままです）。\nAIの返事：\n" + clip(result.text, 1500));
+    return null;
+  }
+  var sh = scheduleSheet(), last = sh.getLastRow();
+  if (last >= 2) sh.getRange(2, 1, last - 1, 6).clearContent();
+  sh.getRange(2, 1, items.length, 6).setValues(items.map(function (x) {
+    return [x.start, x.end, x.title, x.detail, x.source, ymd(now)];
+  }));
+  var lines = items.map(function (x) {
+    return "・" + x.start.slice(5) + (x.end ? "〜" + x.end.slice(5) : "") + "　" + x.title + (x.detail ? "（" + x.detail + "）" : "") + "\n　" + x.source;
+  });
+  discordSend(prop("DISCORD_PROMOTER") || discordUrl(false), noMention(
+    "📅 これからのツムツムの予定（広報係がネットで調べました）\n※AIの調べものです。投稿や一斉送信の前に、公式の告知で確認してください\n\n" + lines.join("\n")));
+  return items;
+}
+
+/** これから2週間（と、開催中）の予定。週1の広報係が使う */
+function upcomingTsumEvents(days) {
+  var sh = scheduleSheet(), last = sh.getLastRow();
+  if (last < 2) return [];
+  var today = ymd(new Date()), until = ymd(new Date(Date.now() + (days || 14) * 86400000));
+  return sh.getRange(2, 1, last - 1, 4).getValues().map(function (r) {
+    return { start: fmtCell(r[0]).slice(0, 10), end: fmtCell(r[1]).slice(0, 10), title: String(r[2]), detail: String(r[3]) };
+  }).filter(function (x) {
+    if (!x.start || !x.title) return false;
+    var running = x.start <= today && (!x.end || x.end >= today);
+    return running || (x.start >= today && x.start <= until);
+  });
 }

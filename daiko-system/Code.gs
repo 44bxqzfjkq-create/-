@@ -667,14 +667,17 @@ function setup() {
 
   ScriptApp.getProjectTriggers().forEach(function (t) {
     var fn = t.getHandlerFunction();
-    if (fn === "onStatusEdit" || fn === "remindUnhandled" || fn === "dailySummary" || fn === "weeklyMeeting") ScriptApp.deleteTrigger(t);
+    if (fn === "onStatusEdit" || fn === "remindUnhandled" || fn === "dailySummary" || fn === "weeklyMeeting" || fn === "monthlyTsumSchedule") ScriptApp.deleteTrigger(t);
   });
   ScriptApp.newTrigger("onStatusEdit").forSpreadsheet(ss).onEdit().create();
   ScriptApp.newTrigger("remindUnhandled").timeBased().everyMinutes(30).create();
   ScriptApp.newTrigger("dailySummary").timeBased().everyDays(1).atHour(9).inTimezone(CONFIG.TIMEZONE).create();
   ScriptApp.newTrigger("weeklyMeeting").timeBased().onWeekDay(ScriptApp.WeekDay.MONDAY).atHour(9).inTimezone(CONFIG.TIMEZONE).create();
+  ScriptApp.newTrigger("monthlyTsumSchedule").timeBased().onMonthDay(1).atHour(8).inTimezone(CONFIG.TIMEZONE).create();
+  ScriptApp.newTrigger("monthlyTsumSchedule").timeBased().onMonthDay(15).atHour(8).inTimezone(CONFIG.TIMEZONE).create();
   escalationSheet(); memoSheet(); // AI店長が使うシートも作る
   reviewSheet(); // 口コミのシートも作る
+  scheduleSheet(); // ツムツムの予定のシートも作る
 
   var ls = lineSheet(); // LINE記録シートも作る
   ls.getRange(2, 4, Math.max(ls.getMaxRows() - 1, 1), 1).setDataValidation(
@@ -685,7 +688,7 @@ function setup() {
 /** 秘密の設定がそろっているか確認します（中身は表示しません）*/
 function checkSecrets() {
   var need = ["LINE_TOKEN", "CLAUDE_API_KEY", "WEBHOOK_KEY", "ADMIN_KEY", "WORKER_KEY", "DISCORD_NORMAL", "DISCORD_PRIORITY", "LINE_BASIC_ID"];
-  var optional = ["APP_URL", "TEST_MODE", "TEST_USER_ID", "DISCORD_MANAGER", "DISCORD_ANALYST", "DISCORD_IMPROVER", "DISCORD_PROMOTER"];
+  var optional = ["APP_URL", "TEST_MODE", "TEST_USER_ID", "DISCORD_MANAGER", "DISCORD_ANALYST", "DISCORD_IMPROVER", "DISCORD_PROMOTER", "PAST_DONE_COUNT", "GALLERY_URL"];
   var missing = 0;
   need.forEach(function (n) { var ok = !!prop(n); if (!ok) missing++; Logger.log((ok ? "OK    " : "未設定 ") + n); });
   optional.forEach(function (n) { Logger.log((prop(n) ? "設定あり " : "（なし）  ") + n + "  ※必要なときだけ"); });

@@ -165,7 +165,12 @@ function buildAchievements() {
   if (last >= 2) {
     sheet.getRange(2, col("ステータス"), last - 1, 1).getValues().forEach(function (r) { if (normStatus(r[0]) === "完了") done++; });
   }
-  if (done >= REVIEW.MIN_COUNT_TO_SHOW) out.push("✅ 代行完了：" + done + "件");
+  // このシステムより前の実績（Instagram時代など）は、スクリプト プロパティ PAST_DONE_COUNT に本当の件数を入れる
+  var past = Math.max(0, Math.floor(Number(prop("PAST_DONE_COUNT")) || 0));
+  if (done + past >= REVIEW.MIN_COUNT_TO_SHOW) out.push("✅ これまでの代行実績\n　" + (done + past).toLocaleString("ja-JP") + "件");
+  // 実績の画像をまとめた場所（GoogleドライブやGoogleフォトの共有リンク）は GALLERY_URL に入れる
+  var gallery = prop("GALLERY_URL");
+  if (/^https:\/\//.test(gallery)) out.push("📸 実績の画像はこちら\n" + gallery);
   var sh = reviewSheet(), rl = sh.getLastRow(), shown = [];
   if (rl >= 2) {
     var v = sh.getRange(2, 1, rl - 1, 4).getValues();

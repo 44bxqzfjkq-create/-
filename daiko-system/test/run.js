@@ -80,7 +80,7 @@ function makeEnv(props) {
       getProjectTriggers: () => [],
       deleteTrigger() {},
       WeekDay: { MONDAY: "MONDAY" },
-      newTrigger: (fn) => { const t = { forSpreadsheet() { return t; }, onEdit() { return t; }, timeBased() { return t; }, everyMinutes() { return t; }, everyDays() { return t; }, onWeekDay() { return t; }, atHour() { return t; }, inTimezone() { return t; }, create() { triggers.push(fn); return t; } }; return t; }
+      newTrigger: (fn) => { const t = { forSpreadsheet() { return t; }, onEdit() { return t; }, timeBased() { return t; }, everyMinutes() { return t; }, everyDays() { return t; }, onWeekDay() { return t; }, onMonthDay() { return t; }, atHour() { return t; }, inTimezone() { return t; }, create() { triggers.push(fn); return t; } }; return t; }
     },
     DriveApp: {
       Access: { ANYONE_WITH_LINK: 1 }, Permission: { VIEW: 1 },
@@ -110,7 +110,8 @@ function makeEnv(props) {
         if (url.indexOf("api.anthropic.com") >= 0) {
           const next = aiQueue.shift();
           if (!next) return res(500, "no scripted ai response");
-          if (next.error) return res(next.error, "error body");
+          if (next.error) return res(next.error, next.errorBody || "error body");
+          if (next.raw) return res(200, JSON.stringify(next.raw));
           return res(200, JSON.stringify({ content: [{ type: "text", text: next.text }] }));
         }
         if (url.indexOf("/profile/") >= 0) return res(200, JSON.stringify({ displayName: "花子" }));
@@ -498,6 +499,16 @@ const discordCalls = (env) => env.fetchLog.filter(c => c.url.indexOf("discord.te
     assert.strictEqual(reviews().filter(r => r[4] === "R2").length, 0);
     assert.ok(JSON.stringify(env.sheets["口コミ"].data).indexOf("abc12345") < 0);
   });
+  test("「実績」ボタン：以前の実績の件数（PAST_DONE_COUNT）と、画像のリンク（GALLERY_URL）を出せる", () => {
+    const e2 = makeEnv(Object.assign({}, BASE_PROPS, { PAST_DONE_COUNT: " 1000 ", GALLERY_URL: "https://drive.example/folder" }));
+    e2.run("setup")();
+    const r = e2.run("matchFixedReply")("実績");
+    assert.ok(r.indexOf("1,000件") >= 0 && r.indexOf("https://drive.example/folder") >= 0, r);
+    const e3 = makeEnv(Object.assign({}, BASE_PROPS, { PAST_DONE_COUNT: "abc", GALLERY_URL: "javascript:alert(1)" }));
+    e3.run("setup")();
+    const r3 = e3.run("matchFixedReply")("実績");
+    assert.ok(r3.indexOf("javascript") < 0 && r3.indexOf("NaN") < 0, r3);
+  });
   test("URLや連絡先が入った口コミは、自動で「NG」（宣伝・いたずら対策）", () => {
     finish("R4", "r4@x.com:pw");
     handle("R4", "最高でした！こっちも見てね https://spam.example");
@@ -518,10 +529,10 @@ const discordCalls = (env) => env.fetchLog.filter(c => c.url.indexOf("discord.te
     let r = fixed("実績");
     assert.ok(r.indexOf("とても早くて助かりました") >= 0 && r.indexOf("お名前は伏せています") >= 0, r);
     assert.ok(r.indexOf("花子") < 0, "名前を出している");
-    assert.ok(r.indexOf("代行完了") < 0, "件数が少ないうちは出さない");
+    assert.ok(r.indexOf("代行実績") < 0, "件数が少ないうちは出さない");
     env.run("REVIEW").MIN_COUNT_TO_SHOW = 2;
     r = fixed("口コミ");
-    assert.ok(/代行完了：\d+件/.test(r), r);
+    assert.ok(/これまでの代行実績\n　\d+件/.test(r), r);
     env.sheets["口コミ"].appendRow([new Date(), "x", "NGの口コミ", "NG", "Rx"]);
     assert.ok(fixed("実績").indexOf("NGの口コミ") < 0);
   });
@@ -889,6 +900,76 @@ const discordCalls = (env) => env.fetchLog.filter(c => c.url.indexOf("discord.te
     const msgs = discordCalls(env).slice(d).map(c => c.body.content);
     assert.ok(msgs[0].indexOf("注文：3件") >= 0 && msgs[0].indexOf("AIが作れませんでした") >= 0, msgs[0]);
     assert.ok(msgs[2].indexOf("担当者行きになった質問はありませんでした") >= 0);
+  });
+}
+
+// ---------------- 5c. 広報係：ツムツムの予定をネットで調べる ----------------
+{
+  const iso = (d) => { const j = new Date(d.getTime() + 9 * 3600000); return j.getUTCFullYear() + "-" + String(j.getUTCMonth() + 1).padStart(2, "0") + "-" + String(j.getUTCDate()).padStart(2, "0"); };
+  const day = (n) => iso(new Date(Date.now() + n * 86400000));
+  const mk = (extra) => { const env = makeEnv(Object.assign({}, BASE_PROPS, extra || {})); env.run("setup")(); return env; };
+  const answer = (items) => ({ raw: { stop_reason: "end_turn", content: [
+    { type: "server_tool_use", id: "s1", name: "web_search", input: { query: "ツムツム 新ツム" } },
+    { type: "web_search_tool_result", tool_use_id: "s1", content: [{ type: "web_search_result", url: "https://official.example/news", title: "お知らせ" }] },
+    { type: "text", text: JSON.stringify(items), citations: [{ type: "web_search_result_location", url: "https://official.example/news" }] }
+  ] } });
+
+  test("setup で、毎月1日と15日の調査が予約される", () => {
+    const env = mk();
+    assert.strictEqual(env.triggers.filter(t => t === "monthlyTsumSchedule").length, 2);
+  });
+  test("予定を調べて、シートとDiscord（広報係）に入れる／出典のないものは捨てる", () => {
+    const env = mk({ DISCORD_PROMOTER: "https://discord.test/pro" });
+    env.aiQueue.push(answer([
+      { start: day(3), end: day(20), title: "新ツム登場", detail: "〇〇ツム", source: "https://official.example/news" },
+      { start: day(1), end: "", title: "セレクトBOX更新", detail: "", source: "https://site.example/a" },
+      { start: day(5), end: "", title: "うわさ", detail: "出典なし", source: "" }
+    ]));
+    const items = env.run("monthlyTsumSchedule")();
+    assert.strictEqual(items.length, 2, "出典のないものを残した");
+    assert.strictEqual(items[0].title, "セレクトBOX更新", "日付の順になっていない");
+    const req = aiCalls(env).pop().body;
+    assert.strictEqual(req.tools[0].type, "web_search_20260209"); assert.strictEqual(req.tools[0].max_uses, 8);
+    assert.strictEqual(req.tools[0].user_location.country, "JP");
+    const rows = env.sheets["ツムツム予定"].getRange(2, 1, 2, 6).getValues();
+    assert.strictEqual(rows[1][2], "新ツム登場"); assert.strictEqual(rows[1][4], "https://official.example/news");
+    const msg = discordCalls(env).filter(c => c.url === "https://discord.test/pro").pop().body.content;
+    assert.ok(msg.indexOf("新ツム登場") >= 0 && msg.indexOf("公式の告知で確認") >= 0, msg);
+  });
+  test("調べものが長くて一時停止したら、続きから再開する", () => {
+    const env = mk();
+    env.aiQueue.push({ raw: { stop_reason: "pause_turn", content: [{ type: "server_tool_use", id: "s1", name: "web_search", input: { query: "q" } }] } });
+    env.aiQueue.push(answer([{ start: day(2), end: "", title: "イベント開始", detail: "", source: "https://official.example/e" }]));
+    const items = env.run("monthlyTsumSchedule")();
+    const calls = aiCalls(env);
+    assert.strictEqual(calls.length, 2);
+    const msgs = calls[1].body.messages;
+    assert.strictEqual(msgs[msgs.length - 1].role, "assistant", "一時停止した続きを送り返していない");
+    assert.strictEqual(items.length, 1);
+  });
+  test("まとめられなかったときや、検索が止められているときは、シートを変えずに知らせる", () => {
+    const env = mk();
+    env.sheets["ツムツム予定"].appendRow([day(1), "", "前の予定", "", "https://x.example", ""]);
+    env.aiQueue.push({ raw: { stop_reason: "end_turn", content: [{ type: "text", text: "見つかりませんでした" }] } });
+    assert.strictEqual(env.run("monthlyTsumSchedule")(), null);
+    env.aiQueue.push({ error: 400, errorBody: '{"error":{"message":"web search is not enabled for this organization"}}' });
+    assert.strictEqual(env.run("monthlyTsumSchedule")(), null);
+    assert.strictEqual(env.sheets["ツムツム予定"].getRange(2, 3).getValue(), "前の予定");
+    const last = discordCalls(env).pop().body.content;
+    assert.ok(last.indexOf("ネット検索") >= 0, last);
+  });
+  test("週1の広報係は、これから2週間の予定を使う（終わった予定・先すぎる予定は使わない）", () => {
+    const env = mk();
+    const sh = env.sheets["ツムツム予定"];
+    [[day(-10), day(-3), "終わったイベント"], [day(-2), day(5), "開催中のガチャ"], [day(4), "", "新ツム登場"], [day(30), "", "先すぎる予定"]]
+      .forEach(r => sh.appendRow([r[0].replace(/-/g, "/"), r[1].replace(/-/g, "/"), r[2], "", "https://x.example", ""]));
+    const ev = env.run("upcomingTsumEvents")(14).map(x => x.title);
+    assert.deepStrictEqual(ev, ["開催中のガチャ", "新ツム登場"]);
+    ["分析", "改善なし"].forEach(() => {});
+    env.aiQueue.push({ text: "分析" }); env.aiQueue.push({ text: "広報" }); env.aiQueue.push({ text: "店長" });
+    env.run("weeklyMeeting")();
+    const promo = aiCalls(env).find(c => c.body.messages[0].content.indexOf("これから2週間のツムツムの予定") >= 0);
+    assert.ok(promo && promo.body.messages[0].content.indexOf("新ツム登場") >= 0 && promo.body.messages[0].content.indexOf("先すぎる予定") < 0);
   });
 }
 
