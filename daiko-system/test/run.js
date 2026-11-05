@@ -24,6 +24,7 @@ function makeEnv(props) {
   const cacheStore = {};
   const sheets = {};
   const triggers = [];
+  const docStore = {};
 
   function colToIdx(c) { return c - 1; }
   function makeSheet(name) {
@@ -61,7 +62,10 @@ function makeEnv(props) {
 
   const ctx = {
     console, Logger: { log: (m) => logs.push(String(m)) },
-    PropertiesService: { getScriptProperties: () => ({ getProperty: (k) => (k in props ? props[k] : null) }) },
+    PropertiesService: {
+      getScriptProperties: () => ({ getProperty: (k) => (k in props ? props[k] : null) }),
+      getDocumentProperties: () => ({ getProperty: (k) => (k in docStore ? docStore[k] : null), setProperty: (k, v) => { docStore[k] = v; }, deleteProperty: (k) => { delete docStore[k]; } })
+    },
     CacheService: { getScriptCache: () => ({
       get: (k) => (k in cacheStore ? cacheStore[k] : null),
       put: (k, v) => { cacheStore[k] = v; },
@@ -120,7 +124,7 @@ function makeEnv(props) {
     vm.runInContext(fs.readFileSync(path.join(root, f), "utf8"), ctx, { filename: f });
   }
   const run = (code) => vm.runInContext(code, ctx);
-  return { ctx, run, logs, fetchLog, aiQueue, cacheStore, sheets, ss, triggers };
+  return { ctx, run, logs, fetchLog, aiQueue, cacheStore, sheets, ss, triggers, docStore };
 }
 
 const BASE_PROPS = {
@@ -452,6 +456,74 @@ const discordCalls = (env) => env.fetchLog.filter(c => c.url.indexOf("discord.te
     env.run("remindUnhandled")();
     assert.strictEqual(env.run("normStatus")(sheet().getRange(row, 10).getValue()), "納品済", "時刻がないのに完了にした");
     assert.notStrictEqual(sheet().getRange(row, 16).getValue(), "", "時刻を記録していない");
+  });
+}
+
+// ---------------- 3b. 口コミと実績 ----------------
+{
+  const env = makeEnv(BASE_PROPS);
+  env.run("setup")();
+  const handle = (uid, text) => { env.run("BOT_STATE").replied = false; env.run("handleTextMessage")(uid, "rt", text); };
+  const lastReply = () => { const c = lineCalls(env, "reply"); return c.length ? c[c.length - 1].body.messages[0].text : ""; };
+  const reviews = () => env.sheets["口コミ"].getRange(2, 1, Math.max(env.sheets["口コミ"].getLastRow() - 1, 1), 5).getValues().filter(r => r[2]);
+  const finish = (uid, contact) => {
+    const o = env.run("submitOrder")({ selected: ["BAN保証"], requester: "花子", amount: 300, contact, note: "", image: IMG });
+    handle(uid, o.lineText);
+    env.run("adminSetStatus")("adminpw", o.receiptNo, "代行中");
+    env.run("workerDeliver")("workerpw", o.receiptNo);
+    handle(uid, "ありがとうございました！");
+    return o;
+  };
+
+  test("完了のメッセージで感想をお願いし、返してくれた感想は口コミシートに「未確認」でたまる（AIは使わない）", () => {
+    finish("R1", "r1@x.com:pw");
+    assert.ok(lastReply().indexOf("感想") >= 0, "完了のメッセージに感想のお願いがない");
+    const a = aiCalls(env).length, d = discordCalls(env).length;
+    handle("R1", "とても早くて助かりました！また頼みます");
+    assert.ok(lastReply().indexOf("感想ありがとう") >= 0, lastReply());
+    assert.strictEqual(aiCalls(env).length, a);
+    const r = reviews();
+    assert.strictEqual(r.length, 1); assert.strictEqual(r[0][2], "とても早くて助かりました！また頼みます", "書いたままの文字で残す"); assert.strictEqual(r[0][3], "未確認");
+    assert.ok(discordCalls(env).length > d, "Discordに口コミのお知らせがない");
+    handle("R1", "もう一回送ってみる感想です");
+    assert.strictEqual(reviews().length, 1, "感想は1回だけ受け付ける");
+  });
+  test("完了のあとでも、質問・不満・パスワードは口コミにしない", () => {
+    finish("R2", "r2@x.com:pw");
+    env.aiQueue.push({ text: JSON.stringify({ reply: "確認します", need_staff: true, closing: false, summary: "未反映" }) });
+    handle("R2", "まだ反映されてないみたいです");
+    env.aiQueue.push({ text: JSON.stringify({ reply: "はい", need_staff: false, closing: false, summary: "質問" }) });
+    handle("R2", "次はいつ頼めますか？");
+    handle("R2", "パスワードは abc12345 です");
+    assert.strictEqual(reviews().filter(r => r[4] === "R2").length, 0);
+    assert.ok(JSON.stringify(env.sheets["口コミ"].data).indexOf("abc12345") < 0);
+  });
+  test("URLや連絡先が入った口コミは、自動で「NG」（宣伝・いたずら対策）", () => {
+    finish("R4", "r4@x.com:pw");
+    handle("R4", "最高でした！こっちも見てね https://spam.example");
+    const r = reviews().filter(x => x[4] === "R4");
+    assert.strictEqual(r.length, 1); assert.strictEqual(r[0][3], "NG");
+  });
+  test("感想の受付は3日まで", () => {
+    finish("R3", "r3@x.com:pw");
+    env.docStore["review_R3"] = String(Date.now() - 4 * 86400000);
+    env.aiQueue.push({ text: JSON.stringify({ reply: "どういたしまして", need_staff: false, closing: false, summary: "x" }) });
+    handle("R3", "前回はありがとうございました、助かりました");
+    assert.strictEqual(reviews().filter(r => r[4] === "R3").length, 0);
+  });
+  test("「実績」ボタン：OKにした口コミだけを新しい順に出す／件数は決めた数以上から", () => {
+    const fixed = (t) => env.run("matchFixedReply")(t);
+    assert.ok(fixed("実績").indexOf("集めています") >= 0, "OKがまだないのに口コミを出した");
+    env.sheets["口コミ"].getRange(2, 4).setValue("OK");
+    let r = fixed("実績");
+    assert.ok(r.indexOf("とても早くて助かりました") >= 0 && r.indexOf("お名前は伏せています") >= 0, r);
+    assert.ok(r.indexOf("花子") < 0, "名前を出している");
+    assert.ok(r.indexOf("代行完了") < 0, "件数が少ないうちは出さない");
+    env.run("REVIEW").MIN_COUNT_TO_SHOW = 2;
+    r = fixed("口コミ");
+    assert.ok(/代行完了：\d+件/.test(r), r);
+    env.sheets["口コミ"].appendRow([new Date(), "x", "NGの口コミ", "NG", "Rx"]);
+    assert.ok(fixed("実績").indexOf("NGの口コミ") < 0);
   });
 }
 

@@ -27,6 +27,7 @@ var BOT = {
   DONE_REPLY: "🎉 確認できました！\nありがとうございます🙌\n\n✅ これで完了です！",
   THANKS_REPLY: "😊 こちらこそ\nありがとうございます！\n\n気になることがあれば\nお気軽にどうぞ💬",
   HOLD_REPLY: "⏳ 担当者が確認中です。\n順番にご連絡しますので\nもう少しお待ちください🙏",
+  REVIEW_THANKS: "⭐ 感想ありがとう\nございます！\n\nとても励みになります😊\nまたいつでも\nお待ちしております",
   BUSY_REPLY: "🙇 ただいま問い合わせが\n混み合っています。\n\n少し時間をおいて\nもう一度お送りください🙏",
   LINE_WIDTH: 14,           // スマホの吹き出し1行に収める幅（全角で14文字ぶん）
   AI_LIMIT_USER: 30,        // 1人あたり、1時間にAIを使える回数
@@ -105,11 +106,76 @@ function wrapForPhone(text, max) {
  * 代行が終わったときに付ける「また使ってね・お友だちにおすすめしてね」の文章
  * （公式LINEの友だち追加リンク付き。そのまま友だちに転送できます）
  */
-function thanksPromo() {
+function thanksPromo(userId) {
   var id = String(prop("LINE_BASIC_ID") || "").trim();
   if (id && id.charAt(0) !== "@") id = "@" + id;
-  return "\n\n🎮 また困ったときは\nいつでもご依頼ください\n\n👫 お友だちにも\nおすすめしてもらえると\nとてもうれしいです😊" +
+  if (userId) startWaitingReview(userId);
+  return "\n\n⭐ よければ感想を\n一言送ってください！\n（お名前は出さずに\n紹介させていただく\nことがあります）" +
+    "\n\n🎮 また困ったときは\nいつでもご依頼ください\n\n👫 お友だちにも\nおすすめしてもらえると\nとてもうれしいです😊" +
     (id ? "\n\n👇 シェア用のリンクです\nhttps://line.me/R/ti/p/" + encodeURIComponent(id) : "");
+}
+
+// ===================================================================
+// 口コミ（完了したお客さんの感想）と、実績の表示
+// ===================================================================
+var REVIEW = {
+  SHEET: "口コミ",
+  WAIT_DAYS: 3,            // 完了してから何日間、感想を受け付けるか
+  SHOW: 3,                 // 「実績・口コミ」ボタンに出す口コミの数（新しい順）
+  MIN_COUNT_TO_SHOW: 10    // 完了件数が、この数以上になったら件数を表示する
+};
+
+function reviewSheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName(REVIEW.SHEET);
+  if (!sh) {
+    sh = ss.insertSheet(REVIEW.SHEET);
+    sh.getRange(1, 1, 1, 5).setValues([["日時", "お客さん名", "口コミ", "掲載", "userId"]]).setFontWeight("bold").setBackground("#f1f3f4");
+    sh.setFrozenRows(1);
+    sh.hideColumns(5);
+    sh.getRange(2, 4, Math.max(sh.getMaxRows() - 1, 1), 1).setDataValidation(
+      SpreadsheetApp.newDataValidation().requireValueInList(["未確認", "OK", "NG"], true).build());
+  }
+  return sh;
+}
+/** 感想を待っている印（6時間で消えるキャッシュでは短いので、ドキュメントのプロパティに保存）*/
+function startWaitingReview(userId) { PropertiesService.getDocumentProperties().setProperty("review_" + userId, String(Date.now())); }
+function isWaitingReview(userId) {
+  var store = PropertiesService.getDocumentProperties();
+  var t = Number(store.getProperty("review_" + userId) || 0);
+  if (!t) return false;
+  if (Date.now() - t > REVIEW.WAIT_DAYS * 86400000) { store.deleteProperty("review_" + userId); return false; }
+  return true;
+}
+function saveReview(userId, name, text) {
+  PropertiesService.getDocumentProperties().deleteProperty("review_" + userId);
+  var t = String(text || "").replace(/\s+/g, " ").trim(); // お客さんが書いたままの文字で残す
+  // URL・メールアドレス・@・電話番号っぽいものがある口コミは、宣伝やいたずらが多いので、自動で「NG」にする
+  var risky = /(https?:|www\.|line\.me|@|＠|\d{2,4}-?\d{2,4}-?\d{3,4}|\.com|\.jp)/i.test(normalizeText(t));
+  reviewSheet().appendRow([new Date(), name || "", clip(t, 300), risky ? "NG" : "未確認", userId]);
+  notifyAdmin("⭐ 新しい口コミが届きました\n「" + noMention(clip(t, 200)) + "」\n\n" + (risky
+    ? "URLや連絡先のような文字が入っているので、自動で「NG」（非表示）にしました。問題なければ「口コミ」シートで「OK」にできます。"
+    : "「実績・口コミ」ボタンに載せてよければ、「口コミ」シートの「掲載」を「OK」にしてください。"));
+}
+
+/** 「実績・口コミ」ボタンの中身（完了件数と、あなたがOKにした口コミ）*/
+function buildAchievements() {
+  var out = [];
+  var sheet = ordersSheet(), done = 0, last = sheet ? sheet.getLastRow() : 0;
+  if (last >= 2) {
+    sheet.getRange(2, col("ステータス"), last - 1, 1).getValues().forEach(function (r) { if (normStatus(r[0]) === "完了") done++; });
+  }
+  if (done >= REVIEW.MIN_COUNT_TO_SHOW) out.push("✅ 代行完了：" + done + "件");
+  var sh = reviewSheet(), rl = sh.getLastRow(), shown = [];
+  if (rl >= 2) {
+    var v = sh.getRange(2, 1, rl - 1, 4).getValues();
+    for (var i = v.length - 1; i >= 0 && shown.length < REVIEW.SHOW; i--) {
+      if (String(v[i][3]) === "OK") shown.push("「" + wrapForPhone(clip(String(v[i][2]), 120), BOT.LINE_WIDTH - 1) + "」");
+    }
+  }
+  if (shown.length) out.push("💬 お客さまの声\n\n" + shown.join("\n\n") + "\n\n※お名前は伏せています");
+  if (!out.length) out.push("📝 ただいま\nお客さまの声を\n集めています😊");
+  return out.join("\n\n");
 }
 
 /** Discordで@everyoneなどが動かないようにする */
@@ -145,11 +211,16 @@ function looksLikeCredentials(text) {
 }
 
 /** お客さんの「ありがとう」「OK」など、終わりの言葉か */
+/** まだ問題がありそうな言葉・質問が混ざっているか */
+function looksLikeProblemOrQuestion(t) {
+  return /(まだ|できて(い)?ない|出来て(い)?ない|おかしい|違う|ちがう|反映|届いて(い)?ない|入って(い)?ない|足りない|返金|キャンセル|不具合|エラー|困|[?？]|ですか|ますか|でしょうか)/.test(normalizeText(t).toLowerCase());
+}
+
 function looksLikeClosing(text) {
   var t = normalizeText(text).toLowerCase();
   if (!t || t.length > 40) return false;
   // まだ問題がありそうな言葉・質問が混ざっていたら、完了にしない
-  if (/(まだ|できて(い)?ない|出来て(い)?ない|おかしい|違う|ちがう|反映|届いて(い)?ない|入って(い)?ない|足りない|返金|キャンセル|不具合|エラー|困|[?？]|ですか|ますか|でしょうか)/.test(t)) return false;
+  if (looksLikeProblemOrQuestion(t)) return false;
   if (/(^|[^a-z])ok([^a-z]|$)/.test(t)) return true;
   return /(ありがとう|ありがと|あざ(ます|っす|す)|感謝|助かり|おk|オッケー|おっけー|了解|りょうかい|確認(しました|できました)|受け取りました|届きました|大丈夫です|問題(ない|なし|ありません)|完了です|以上です)/.test(t);
 }
@@ -176,7 +247,7 @@ function matchFixedReply(text) {
     if (normalizeText(k).toLowerCase() !== key) continue;
     var body = FIXED_REPLIES[k];
     if (!body || String(body).indexOf("【未設定】") >= 0) return null; // 未入力の返事は送らない
-    return String(body).replace(/\{\{料金表\}\}/g, buildPriceListForLine());
+    return String(body).replace(/\{\{料金表\}\}/g, buildPriceListForLine()).replace(/\{\{実績\}\}/g, buildAchievements());
   }
   return null;
 }
@@ -462,6 +533,14 @@ function handleTextMessage(userId, replyToken, rawText) {
     upsertLineRecord(userId, name, {});
     return;
   }
+  // 4b. 完了のあとに送ってくれた感想 → 口コミシートへ
+  if (isWaitingReview(userId) && normalizeText(text).length >= 6 && !looksLikeProblemOrQuestion(text)) {
+    saveReview(userId, name, rawText);
+    lineReply(replyToken, BOT.REVIEW_THANKS);
+    addHistory(userId, text, BOT.REVIEW_THANKS);
+    upsertLineRecord(userId, name, {});
+    return;
+  }
   // 5. 納品済のあとの「ありがとう」→ 完了
   var delivered = orders.filter(function (o) { return o.status === "納品済"; });
   var closing = looksLikeClosing(text);
@@ -583,7 +662,7 @@ function handleProgress(userId, replyToken, name, orders) {
 function completeByCustomer(userId, replyToken, name, text, delivered) {
   var sheet = ordersSheet();
   delivered.forEach(function (o) { setOrderStatus(sheet, o.row, "完了", { notifyCustomer: false }); });
-  lineReply(replyToken, BOT.DONE_REPLY + thanksPromo());
+  lineReply(replyToken, BOT.DONE_REPLY + thanksPromo(userId));
   addHistory(userId, text, BOT.DONE_REPLY);
   upsertLineRecord(userId, name, {});
 }
@@ -610,7 +689,7 @@ function answerWithAi(userId, replyToken, name, text, rec, orders, delivered) {
     var sheet = ordersSheet();
     delivered.forEach(function (o) { setOrderStatus(sheet, o.row, "完了", { notifyCustomer: false }); });
   }
-  var sentReply = done ? reply + thanksPromo() : reply;
+  var sentReply = done ? reply + thanksPromo(userId) : reply;
   lineReply(replyToken, sentReply);
   addHistory(userId, text, reply);
 

@@ -348,7 +348,7 @@ function applyStatusEffects(sheet, row, status, opts) {
   if (status === "完了") {
     deleteDiscordMessage(sheet, row);
     if (userId) {
-      if (opts.notifyCustomer !== false) linePush(userId, "🙏 ご利用ありがとう\nございました！" + thanksPromo());
+      if (opts.notifyCustomer !== false) linePush(userId, "🙏 ご利用ありがとう\nございました！" + thanksPromo(userId));
       markLineRecordDone(userId);
     }
   }
@@ -624,7 +624,7 @@ function autoCompleteDelivered(sheet) {
     if (userId && getLineRecord(userId).status === "担当者待ち") continue; // 問題が起きているかもしれないので、残す
     setOrderStatus(sheet, row, "完了", { notifyCustomer: false });
     if (userId) {
-      linePush(userId, "✅ 受付番号\n" + v[i][col("受付番号") - 1] + "\n\n納品から" + CONFIG.AUTO_COMPLETE_HOURS + "時間たったので\n完了にしました。\nご利用ありがとう\nございました🙏\n\n💬 気になる点があれば\nいつでもご連絡ください" + thanksPromo());
+      linePush(userId, "✅ 受付番号\n" + v[i][col("受付番号") - 1] + "\n\n納品から" + CONFIG.AUTO_COMPLETE_HOURS + "時間たったので\n完了にしました。\nご利用ありがとう\nございました🙏\n\n💬 気になる点があれば\nいつでもご連絡ください" + thanksPromo(userId));
     }
   }
 }
@@ -674,6 +674,7 @@ function setup() {
   ScriptApp.newTrigger("dailySummary").timeBased().everyDays(1).atHour(9).inTimezone(CONFIG.TIMEZONE).create();
   ScriptApp.newTrigger("weeklyMeeting").timeBased().onWeekDay(ScriptApp.WeekDay.MONDAY).atHour(9).inTimezone(CONFIG.TIMEZONE).create();
   escalationSheet(); memoSheet(); // AI店長が使うシートも作る
+  reviewSheet(); // 口コミのシートも作る
 
   var ls = lineSheet(); // LINE記録シートも作る
   ls.getRange(2, 4, Math.max(ls.getMaxRows() - 1, 1), 1).setDataValidation(
