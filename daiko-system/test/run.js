@@ -784,6 +784,22 @@ const discordCalls = (env) => env.fetchLog.filter(c => c.url.indexOf("discord.te
     assert.ok(msgs[1].indexOf("分析係") >= 0 && msgs[2].indexOf("改善係") >= 0 && msgs[3].indexOf("広報係") >= 0);
     assert.ok(JSON.stringify(env.sheets["AI朝礼"].data).indexOf("今週の朝礼") >= 0, "シートに残っていない");
   });
+  test("朝礼：係ごとのチャンネルを設定すると、それぞれに届く／長い報告は分けて送る", () => {
+    const env = makeEnv(Object.assign({}, BASE_PROPS, { DISCORD_MANAGER: "https://discord.test/mgr", DISCORD_ANALYST: "https://discord.test/ana",
+      DISCORD_IMPROVER: "https://discord.test/imp", DISCORD_PROMOTER: "https://discord.test/pro" }));
+    env.run("setup")(); seed(env);
+    env.run("notifyStaff")("花子", [], "質問です", "テスト");
+    ["分析", "改善", ("広報の長い案\n").repeat(300), "やること"].forEach(t => env.aiQueue.push({ text: t }));
+    env.run("weeklyMeeting")();
+    const to = (u) => discordCalls(env).filter(c => c.url === u).map(c => c.body.content);
+    assert.ok(to("https://discord.test/mgr")[0].indexOf("今週の朝礼") >= 0);
+    assert.ok(to("https://discord.test/ana")[0].indexOf("分析係") >= 0);
+    assert.ok(to("https://discord.test/imp")[0].indexOf("改善係") >= 0);
+    const pro = to("https://discord.test/pro");
+    assert.ok(pro.length >= 2, "長い報告が分かれていない");
+    pro.forEach(c => assert.ok(c.length <= 1900));
+    assert.strictEqual(pro.join("\n").split("広報の長い案").length - 1, 300, "分けたときに文章が欠けた");
+  });
   test("朝礼：担当者行きがなければ、改善係はAIを使わない／AIが失敗しても数字は届く", () => {
     const env = mkEnv(); seed(env);
     env.aiQueue.push({ error: 500 }); env.aiQueue.push({ error: 500 }); env.aiQueue.push({ error: 500 });

@@ -12,6 +12,9 @@
  *   - AIは提案するだけです。マニュアルの変更や一斉送信は、あなたが確認してから行います
  *   - 今すぐ試すときは、関数 weeklyMeeting を選んで ▷実行
  *   - 「AI店長メモ」シートのB2に、来週の予定（新ツム・イベントなど）を書くと、広報係がそれに合わせます
+ *   - 係ごとにDiscordのチャンネルを分けるときは、スクリプト プロパティに
+ *     DISCORD_MANAGER（店長）・DISCORD_ANALYST（分析係）・DISCORD_IMPROVER（改善係）・DISCORD_PROMOTER（広報係）
+ *     の名前で、それぞれのWebhook URLを入れます（入れていない係は、通常チャンネルに届きます）
  */
 
 var STAFF = {
@@ -218,7 +221,10 @@ function weeklyMeeting() {
     "📚 改善係より\n" + improver + "\n\n※マニュアルを変えるときは、内容を確認してから Manual.gs に足してください",
     "📣 広報係より\n" + promoter + "\n\n※投稿・送信する前に、内容を確認してください"
   ];
-  parts.forEach(function (p) { discordText(noMention(p)); });
+  // 係ごとのチャンネル（スクリプト プロパティ）に送る。設定がなければ、いつもの通常チャンネルへ
+  ["DISCORD_MANAGER", "DISCORD_ANALYST", "DISCORD_IMPROVER", "DISCORD_PROMOTER"].forEach(function (name, i) {
+    discordSend(prop(name) || discordUrl(false), noMention(parts[i]));
+  });
   saveReport(now, parts.join("\n\n━━━━━━━━━━\n\n"));
   return parts;
 }

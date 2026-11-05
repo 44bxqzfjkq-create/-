@@ -257,13 +257,24 @@ function savePhotoToDrive(image, receiptNo) {
 function discordUrl(isPriority) {
   return prop(isPriority ? "DISCORD_PRIORITY" : "DISCORD_NORMAL");
 }
-function discordText(text) {
-  var url = discordUrl(false);
+function discordText(text) { discordSend(discordUrl(false), text); }
+
+/** 指定のWebhookに送る（長い文章は、行の切れ目で1900文字ずつに分けて送る）*/
+function discordSend(url, text) {
   if (!url) return;
-  try {
-    UrlFetchApp.fetch(url, { method: "post", contentType: "application/json",
-      payload: JSON.stringify({ content: String(text).slice(0, 1900) }), muteHttpExceptions: true });
-  } catch (e) { Logger.log("Discord送信失敗: " + e); }
+  var lines = String(text).split("\n"), chunks = [], cur = "";
+  lines.forEach(function (l) {
+    while (l.length > 1900) { if (cur) { chunks.push(cur); cur = ""; } chunks.push(l.slice(0, 1900)); l = l.slice(1900); }
+    if (cur && (cur + "\n" + l).length > 1900) { chunks.push(cur); cur = l; }
+    else cur = cur ? cur + "\n" + l : l;
+  });
+  if (cur) chunks.push(cur);
+  chunks.forEach(function (c) {
+    try {
+      UrlFetchApp.fetch(url, { method: "post", contentType: "application/json",
+        payload: JSON.stringify({ content: c }), muteHttpExceptions: true });
+    } catch (e) { Logger.log("Discord送信失敗: " + e); }
+  });
 }
 /** 管理者への連絡（Discord） */
 function notifyAdmin(text) { discordText(text); }
@@ -672,7 +683,7 @@ function setup() {
 /** 秘密の設定がそろっているか確認します（中身は表示しません）*/
 function checkSecrets() {
   var need = ["LINE_TOKEN", "CLAUDE_API_KEY", "WEBHOOK_KEY", "ADMIN_KEY", "WORKER_KEY", "DISCORD_NORMAL", "DISCORD_PRIORITY", "LINE_BASIC_ID"];
-  var optional = ["APP_URL", "TEST_MODE", "TEST_USER_ID"];
+  var optional = ["APP_URL", "TEST_MODE", "TEST_USER_ID", "DISCORD_MANAGER", "DISCORD_ANALYST", "DISCORD_IMPROVER", "DISCORD_PROMOTER"];
   var missing = 0;
   need.forEach(function (n) { var ok = !!prop(n); if (!ok) missing++; Logger.log((ok ? "OK    " : "未設定 ") + n); });
   optional.forEach(function (n) { Logger.log((prop(n) ? "設定あり " : "（なし）  ") + n + "  ※必要なときだけ"); });
