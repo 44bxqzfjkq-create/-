@@ -55,7 +55,8 @@ var STARTED_COL = CONFIG.HEADER.length + 7;   // 代行者が「代行を始め�
 
 // ===== 小さな道具 =====
 function prop(name) {
-  return PropertiesService.getScriptProperties().getProperty(name) || "";
+  // 貼り付けたときに入りがちな、前後の空白・改行は取りのぞく
+  return String(PropertiesService.getScriptProperties().getProperty(name) || "").trim();
 }
 function col(name) { return CONFIG.HEADER.indexOf(name) + 1; }
 /** このアプリのURL（スクリプト プロパティに APP_URL があれば、それを使う）*/

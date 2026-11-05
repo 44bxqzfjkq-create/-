@@ -713,6 +713,14 @@ const discordCalls = (env) => env.fetchLog.filter(c => c.url.indexOf("discord.te
     assert.strictEqual(env.run("appUrl")(), "https://script.google.com/macros/s/REAL/exec");
     assert.strictEqual(mk().run("appUrl")(), "https://script.google.com/macros/s/TEST/exec");
   });
+  test("鍵の前後に空白や改行が入っていても、正しく使える", () => {
+    const env = makeEnv(Object.assign({}, BASE_PROPS, { CLAUDE_API_KEY: "  KEY\n", LINE_TOKEN: "TOKEN \n" }));
+    env.run("setup")();
+    env.aiQueue.push({ text: JSON.stringify({ reply: "はい", need_staff: false, closing: false, summary: "x" }) });
+    env.run("BOT_STATE").replied = false; env.run("handleTextMessage")("U1", "rt", "こんにちは");
+    assert.strictEqual(aiCalls(env)[0].headers["x-api-key"], "KEY");
+    assert.strictEqual(lineCalls(env, "reply")[0].headers.Authorization, "Bearer TOKEN");
+  });
   test("checkSecrets：足りない設定を教える（中身は表示しない）", () => {
     const env = makeEnv({ LINE_TOKEN: "SECRETVALUE" });
     env.run("checkSecrets")();
