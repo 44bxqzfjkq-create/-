@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Authorization - Daily Video Poster</title>
+<style>body{font-family:system-ui,sans-serif;max-width:720px;margin:40px auto;padding:0 16px;line-height:1.7;color:#222}code{display:block;padding:12px;background:#f2f2f2;word-break:break-all}</style></head><body>
+<h1>Daily Video Poster</h1>
+<p id="msg"></p><code id="code"></code>
+<script>
+const p = new URLSearchParams(location.search);
+const code = p.get("code"), err = p.get("error_description") || p.get("error");
+document.getElementById("msg").textContent = code ? "認証に成功しました。下の認証コードをコピーしてください (数分で無効になります)。"
+  : err ? "認証に失敗しました: " + err : "このページは TikTok の認証後に表示されます。";
+document.getElementById("code").textContent = code || "";
+</script>
+</body></html>
