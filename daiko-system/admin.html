@@ -48,6 +48,9 @@
   <div id="main" style="display:none">
     <div class="tiles" id="tiles"></div>
     <div class="btns" style="justify-content:flex-end">
+      <span class="hint" id="salesFrom"></span>
+      <button class="gray" id="undoSalesBtn" style="display:none">元に戻す</button>
+      <button class="gray" id="resetSalesBtn">💴 売上をリセット</button>
       <button class="gray" id="eraseBtn">🧹 完了した注文の個人情報を消す</button>
     </div>
     <div id="inqBox" style="display:none">
@@ -108,6 +111,8 @@
       function t(l, v){ return '<div class="tile"><div class="l">' + l + '</div><div class="v">' + v + '</div></div>'; }
       $("tiles").innerHTML = t("未対応", s.counts["未対応"] + "件") + t("代行中", s.counts["代行中"] + "件") +
         t("再入力待ち", s.counts["再入力待ち"] + "件") + t("納品済", s.counts["納品済"] + "件") + t("今日の売上", yen(s.todaySum)) + t("今月の売上", yen(s.monthSum));
+      $("salesFrom").textContent = s.salesFrom ? "売上は " + s.salesFrom.slice(0, 16) + " から数えています" : "";
+      $("undoSalesBtn").style.display = s.salesFrom ? "inline-block" : "none";
     }).adminStats(KEY);
     loadInquiries();
   }
@@ -196,6 +201,15 @@
       });
     }).adminDetail(KEY, CUR);
   }
+
+  $("resetSalesBtn").addEventListener("click", function(){
+    if (!confirm("売上の数字（今日の売上・今月の売上・まとめ・AI朝礼）を、今から0で数え直します。\n注文の履歴は消えません。\nよろしいですか？")) return;
+    google.script.run.withSuccessHandler(function(r){ if (r && r.ok) loadStats(); else alert("リセットできませんでした"); }).adminResetSales(KEY, false);
+  });
+  $("undoSalesBtn").addEventListener("click", function(){
+    if (!confirm("売上のリセットを元に戻して、すべての注文を売上に数えます。よろしいですか？")) return;
+    google.script.run.withSuccessHandler(function(r){ if (r && r.ok) loadStats(); else alert("元に戻せませんでした"); }).adminResetSales(KEY, true);
+  });
 
   $("eraseBtn").addEventListener("click", function(){
     if (!confirm("「完了」になった注文の、代行アカウント（メアド・パスワード）と支払いの写真を消します。\n売上の記録（日時・受付番号・メニュー・金額）は残ります。\n消したものは元に戻せません。よろしいですか？")) return;

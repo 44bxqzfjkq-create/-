@@ -589,6 +589,31 @@ function adminSendLine(key, receiptNo, text) {
   return linePush(userId, text) ? { ok: true } : { ok: false, reason: "LINEへの送信に失敗しました。" };
 }
 
+// ===== 売上だけリセット（注文の履歴は消さない）=====
+// 「売上をリセット」を押した時刻を覚えておき、それより前の注文は売上に数えない
+function salesFrom() {
+  try { return PropertiesService.getDocumentProperties().getProperty("SALES_FROM") || ""; } catch (e) { return ""; }
+}
+/** この受付日時の注文を、売上に数えるか */
+function countsForSales(receivedAt) {
+  var from = salesFrom();
+  return !from || fmtCell(receivedAt) >= from;
+}
+/** 管理ページの「💴 売上をリセット」（undo=true で元に戻す）*/
+function adminResetSales(key, undo) {
+  if (!isAdmin(key)) return { ok: false };
+  var store = PropertiesService.getDocumentProperties();
+  if (undo) {
+    store.deleteProperty("SALES_FROM");
+    notifyAdmin("💴 売上のリセットを元に戻しました（すべての注文を売上に数えます）。");
+    return { ok: true, from: "" };
+  }
+  var from = Utilities.formatDate(new Date(), CONFIG.TIMEZONE, "yyyy/MM/dd HH:mm:ss");
+  store.setProperty("SALES_FROM", from);
+  notifyAdmin("💴 売上をリセットしました（" + from + " から数え直します）。注文の履歴は残っています。");
+  return { ok: true, from: from };
+}
+
 function adminStats(key) {
   if (!isAdmin(key)) return { ok: false };
   var sheet = ordersSheet(), now = new Date();
@@ -603,10 +628,12 @@ function adminStats(key) {
       var amt = Number(v[i][col("金額") - 1]) || 0;
       var st = normStatus(v[i][col("ステータス") - 1]);
       if (s.counts.hasOwnProperty(st)) s.counts[st]++;
+      if (!countsForSales(ts)) continue; // 売上をリセットする前の注文は、売上に数えない
       if (ts.indexOf(today) === 0) { s.todayCnt++; s.todaySum += amt; }
       if (ts.indexOf(month) === 0) { s.monthCnt++; s.monthSum += amt; }
     }
   }
+  s.salesFrom = salesFrom();
   s.ok = true;
   return s;
 }
@@ -736,7 +763,10 @@ function dailySummary() {
     for (var i = 0; i < v.length; i++) {
       var st = normStatus(v[i][col("ステータス") - 1]);
       if (st === "未対応" || st === "代行中" || st === "再入力待ち") pending++;
-      if (fmtCell(v[i][col("受付日時") - 1]).indexOf(ymd) === 0) { cnt++; sum += Number(v[i][col("金額") - 1]) || 0; }
+      if (fmtCell(v[i][col("受付日時") - 1]).indexOf(ymd) === 0) {
+        cnt++;
+        if (countsForSales(v[i][col("受付日時") - 1])) sum += Number(v[i][col("金額") - 1]) || 0;
+      }
     }
   }
   notifyAdmin("📊 昨日のまとめ(" + ymd + ")\n件数: " + cnt + "件\n売上: ¥" + sum.toLocaleString("ja-JP") + "\n対応待ち(未対応・代行中・再入力待ち): " + pending + "件");

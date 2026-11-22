@@ -96,7 +96,8 @@ function weeklyStats(now) {
   if (last >= 2) {
     var v = sheet.getRange(2, 1, last - 1, DELIVERED_COL).getValues();
     var rows = v.map(function (r) {
-      return { t: toDate(r[col("受付日時") - 1]), amount: Number(r[col("金額") - 1]) || 0,
+      return { t: toDate(r[col("受付日時") - 1]),
+               amount: countsForSales(r[col("受付日時") - 1]) ? (Number(r[col("金額") - 1]) || 0) : 0, // 売上リセット前の注文は0円として数える
                status: normStatus(r[col("ステータス") - 1]), menu: String(r[col("希望メニュー") - 1] || ""),
                key: statKey(r[col("連絡先") - 1]), line: String(r[LINE_COL - 1] || ""),
                delivered: r[DELIVERED_COL - 1] ? toDate(r[DELIVERED_COL - 1]) : null };

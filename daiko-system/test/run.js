@@ -724,6 +724,32 @@ const discordCalls = (env) => env.fetchLog.filter(c => c.url.indexOf("discord.te
   });
 }
 
+{
+  test("売上だけリセット：注文の履歴は残したまま、売上の数字を0から数え直す／元に戻せる", () => {
+    const env = makeEnv(BASE_PROPS);
+    env.run("setup")();
+    const sub = (c) => env.run("submitOrder")({ selected: ["プレミアムBOX完売"], requester: "花子", amount: 1500, contact: c, note: "", image: IMG });
+    sub("s1@x.com:p"); sub("s2@x.com:p");
+    const stats = () => env.run("adminStats")("adminpw");
+    assert.strictEqual(stats().monthSum, 3000);
+    assert.strictEqual(env.run("adminResetSales")("bad").ok, false, "パスワードが必要");
+    const r = env.run("adminResetSales")("adminpw");
+    assert.ok(r.ok && /^\d{4}\/\d{2}\/\d{2} \d{2}:\d{2}:\d{2}$/.test(r.from), JSON.stringify(r));
+    env.docStore["SALES_FROM"] = "9999/12/31 00:00:00"; // テストでは「リセットした時刻」を先にずらして確かめる
+    assert.strictEqual(stats().monthSum, 0, "リセットしたのに売上が残っている");
+    assert.strictEqual(stats().todaySum, 0);
+    assert.strictEqual(env.sheets["受付"].getLastRow(), 3, "注文の履歴まで消えた");
+    assert.strictEqual(env.run("weeklyStats")(new Date(Date.now() + 10 * 3600000)).revenue, 0, "AI朝礼の売上がリセットされていない");
+    assert.strictEqual(env.run("weeklyStats")(new Date(Date.now() + 10 * 3600000)).orders, 2, "注文の件数まで消えた");
+    env.docStore["SALES_FROM"] = "2000/01/01 00:00:00";
+    assert.strictEqual(stats().monthSum, 3000, "リセットより後の注文は数える");
+    assert.strictEqual(env.run("adminResetSales")("adminpw", true).ok, true);
+    assert.ok(!("SALES_FROM" in env.docStore));
+    assert.strictEqual(stats().salesFrom, "");
+    assert.ok(discordCalls(env).some(c => c.body && c.body.content && c.body.content.indexOf("売上をリセットしました") >= 0), "知らせがない");
+  });
+}
+
 // ---------------- 4b. いたずら・嫌がらせ対策 ----------------
 {
   const env = makeEnv(BASE_PROPS);
