@@ -708,6 +708,9 @@ const discordCalls = (env) => env.fetchLog.filter(c => c.url.indexOf("discord.te
     env.docStore["review_UW"] = String(Date.now());
     env.run("adminSetStatus")("adminpw", o.receiptNo, "完了");
     const del = discordCalls(env).filter(c => c.method === "delete").length;
+    const wrong = env.run("adminWipeAll")("adminpw", "全て削除");
+    assert.strictEqual(wrong.ok, false, "確認の文字が違うのに消した");
+    assert.ok(env.sheets["受付"].getLastRow() >= 2, "確認の文字が違うのに消えている");
     const r = env.run("adminWipeAll")("adminpw", " すべて削除 ");
     assert.strictEqual(r.ok, true, JSON.stringify(r)); assert.strictEqual(r.orders, 1);
     ["受付", "LINE記録", "口コミ", "担当者行きログ"].forEach(n => {
