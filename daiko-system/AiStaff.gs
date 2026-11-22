@@ -68,9 +68,19 @@ function nextWeekMemo() {
 // ===================================================================
 /** 代行するゲームアカウントを見分けるための文字（メールアドレス。なければ「:」の前）*/
 function accountKey(contact) {
-  var m = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/.exec(String(contact || ""));
+  var s = String(contact || "");
+  if (s.indexOf(ERASED) === 0) return s.split("#")[1] ? "#" + s.split("#")[1] : ""; // 消したあとは、記号で見分ける
+  var m = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/.exec(s);
   if (m) return m[0].toLowerCase();
   return String(contact || "").split(/[:：\s]/)[0].trim().toLowerCase();
+}
+
+/** リピートの集計用：消す前も消したあとも、同じゲームアカウントなら同じ記号になる */
+function statKey(contact) {
+  var s = String(contact || "");
+  if (s.indexOf(ERASED) === 0) return accountKey(s);
+  var k = accountKey(s);
+  return k ? "#" + accountHash(k) : "";
 }
 
 /** 直近7日間と、その前の7日間の数字 */
@@ -88,7 +98,7 @@ function weeklyStats(now) {
     var rows = v.map(function (r) {
       return { t: toDate(r[col("受付日時") - 1]), amount: Number(r[col("金額") - 1]) || 0,
                status: normStatus(r[col("ステータス") - 1]), menu: String(r[col("希望メニュー") - 1] || ""),
-               key: accountKey(r[col("連絡先") - 1]), line: String(r[LINE_COL - 1] || ""),
+               key: statKey(r[col("連絡先") - 1]), line: String(r[LINE_COL - 1] || ""),
                delivered: r[DELIVERED_COL - 1] ? toDate(r[DELIVERED_COL - 1]) : null };
     }).filter(function (r) { return r.t; });
     rows.sort(function (a, b) { return a.t - b.t; });

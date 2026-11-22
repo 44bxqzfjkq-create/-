@@ -25,6 +25,7 @@ function makeEnv(props) {
   const sheets = {};
   const triggers = [];
   const docStore = {};
+  const trashed = [];
 
   function colToIdx(c) { return c - 1; }
   function makeSheet(name) {
@@ -85,12 +86,15 @@ function makeEnv(props) {
     DriveApp: {
       Access: { ANYONE_WITH_LINK: 1 }, Permission: { VIEW: 1 },
       getFoldersByName: () => ({ hasNext: () => false }),
-      createFolder: () => ({ createFile: (b) => ({ setSharing() {}, getUrl: () => "https://drive.example/" + b.name }) })
+      createFolder: () => ({ createFile: (b) => ({ setSharing() {}, getUrl: () => "https://drive.google.com/file/d/F" + Buffer.from(b.name).toString("hex") + "/view" }) }),
+      getFileById: (id) => ({ setTrashed: (v) => { if (v) trashed.push(id); } })
     },
     HtmlService: {}, ContentService: { createTextOutput: (t) => ({ text: t }) },
     Utilities: {
       getUuid: () => "abcdef12-3456-7890-abcd-ef1234567890",
       sleep: () => {},
+      DigestAlgorithm: { SHA_256: "sha256" }, Charset: { UTF_8: "utf8" },
+      computeDigest: (alg, str) => Array.from(require("crypto").createHash("sha256").update(String(str), "utf8").digest()).map(b => (b > 127 ? b - 256 : b)),
       base64EncodeWebSafe: (s) => Buffer.from(String(s)).toString("base64"),
       base64Decode: (s) => Array.from(Buffer.from(s, "base64")),
       newBlob: (bytes, type, name) => ({ bytes, type, name }),
@@ -125,7 +129,7 @@ function makeEnv(props) {
     vm.runInContext(fs.readFileSync(path.join(root, f), "utf8"), ctx, { filename: f });
   }
   const run = (code) => vm.runInContext(code, ctx);
-  return { ctx, run, logs, fetchLog, aiQueue, cacheStore, sheets, ss, triggers, docStore };
+  return { ctx, run, logs, fetchLog, aiQueue, cacheStore, sheets, ss, triggers, docStore, trashed };
 }
 
 const BASE_PROPS = {
@@ -258,7 +262,7 @@ const discordCalls = (env) => env.fetchLog.filter(c => c.url.indexOf("discord.te
     const d = discordCalls(env).find(c => c.body && c.body.embeds);
     assert.ok(d, "Discord通知がない");
     const s = JSON.stringify(d.body);
-    assert.ok(s.indexOf("secretPW99") < 0 && s.indexOf("a@b.com") < 0 && s.indexOf("drive.example") < 0, "漏れている");
+    assert.ok(s.indexOf("secretPW99") < 0 && s.indexOf("a@b.com") < 0 && s.indexOf("/file/d/") < 0, "漏れている");
     assert.ok(s.indexOf(order.receiptNo) >= 0 && s.indexOf("花子") >= 0);
   });
   test("連続で同じ内容を送ると止める", () => {
@@ -314,7 +318,7 @@ const discordCalls = (env) => env.fetchLog.filter(c => c.url.indexOf("discord.te
     const w = env.run("workerList")("workerpw");
     assert.strictEqual(w.list.length, 1);
     assert.deepStrictEqual(Object.keys(w.list[0]).sort(), ["account", "fixed", "menu", "no", "note", "started"]);
-    assert.ok(JSON.stringify(w).indexOf("花子") < 0 && JSON.stringify(w).indexOf("drive.example") < 0);
+    assert.ok(JSON.stringify(w).indexOf("花子") < 0 && JSON.stringify(w).indexOf("/file/d/") < 0);
   });
   test("代行者が「代行を始める」→ お客さんに「終わるまでログインしないで」と届く（1回だけ）", () => {
     handle("U1", "進捗");
@@ -649,6 +653,39 @@ const discordCalls = (env) => env.fetchLog.filter(c => c.url.indexOf("discord.te
     handle("U4", "@everyone 助けて");
     const last = discordCalls(env).filter(c => c.body && c.body.content).pop();
     assert.ok(last.body.content.indexOf("@everyone") < 0);
+  });
+}
+
+// ---------------- 4a. ボタン1つで個人情報を消す ----------------
+{
+  const env = makeEnv(BASE_PROPS);
+  env.run("setup")();
+  const sheet = () => env.sheets["受付"];
+  const order = (contact) => env.run("submitOrder")({ selected: ["BAN保証"], requester: "花子", amount: 300, contact, note: "", image: IMG });
+  const rowOf = (o) => env.run("findOrderRow")(sheet(), o.receiptNo);
+  test("完了した注文の、メアド・パスワードと支払いの写真だけを消す（売上の記録は残る）", () => {
+    const done1 = order("same@x.com:pass1"), done2 = order("other@x.com:pass2"), working = order("busy@x.com:pass3");
+    env.run("adminSetStatus")("adminpw", done1.receiptNo, "完了");
+    env.run("adminSetStatus")("adminpw", done2.receiptNo, "完了");
+    env.run("adminSetStatus")("adminpw", working.receiptNo, "代行中");
+    assert.strictEqual(env.run("adminErasePrivate")("bad").ok, false, "パスワードが必要");
+    const r = env.run("adminErasePrivate")("adminpw");
+    assert.strictEqual(r.count, 2);
+    const row = sheet().getRange(rowOf(done1), 1, 1, 10).getValues()[0];
+    assert.ok(String(row[6]).indexOf("（削除済み）") === 0, "連絡先が消えていない: " + row[6]);
+    assert.ok(JSON.stringify(sheet().data).indexOf("pass1") < 0 && JSON.stringify(sheet().data).indexOf("same@x.com") < 0, "メアド・パスワードが残っている");
+    assert.strictEqual(row[8], "（削除済み）");
+    assert.strictEqual(env.trashed.length, 2, "写真がゴミ箱に入っていない");
+    assert.strictEqual(row[1], done1.receiptNo); assert.strictEqual(row[5], 300); assert.strictEqual(row[3], "BAN保証");
+    assert.strictEqual(String(sheet().getRange(rowOf(working), 7).getValue()), "busy@x.com:pass3", "代行中の注文まで消した");
+    assert.strictEqual(env.run("adminErasePrivate")("adminpw").count, 0, "2回目は何も消さない");
+  });
+  test("消したあとも、同じゲームアカウントの再注文はリピートとして数えられる", () => {
+    const again = order("same@x.com:newpass");
+    // フォームの受付日時は日本時間の文字で入るので、テスト環境（日本時間ではない）とずれないよう少し先の時刻で数える
+    const s = env.run("weeklyStats")(new Date(Date.now() + 10 * 3600000));
+    assert.strictEqual(s.repeatCustomers, 1, JSON.stringify(s));
+    assert.strictEqual(s.newCustomers, 3);
   });
 }
 

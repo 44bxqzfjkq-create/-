@@ -47,6 +47,9 @@
 
   <div id="main" style="display:none">
     <div class="tiles" id="tiles"></div>
+    <div class="btns" style="justify-content:flex-end">
+      <button class="gray" id="eraseBtn">🧹 完了した注文の個人情報を消す</button>
+    </div>
     <div id="inqBox" style="display:none">
       <div class="hint">🙋 担当者待ちのお問い合わせ（このお客さんにはボットが返事を止めています。対応が終わったら「対応済にする」を押すと、ボットが再開します）</div>
       <div id="inq"></div>
@@ -188,6 +191,16 @@
       });
     }).adminDetail(KEY, CUR);
   }
+
+  $("eraseBtn").addEventListener("click", function(){
+    if (!confirm("「完了」になった注文の、代行アカウント（メアド・パスワード）と支払いの写真を消します。\n売上の記録（日時・受付番号・メニュー・金額）は残ります。\n消したものは元に戻せません。よろしいですか？")) return;
+    $("eraseBtn").disabled = true;
+    google.script.run.withSuccessHandler(function(r){
+      $("eraseBtn").disabled = false;
+      if (r && r.ok) { alert(r.count ? r.count + "件の個人情報を消しました。" : "消すものはありませんでした。"); refresh(); }
+      else alert("消せませんでした。");
+    }).withFailureHandler(function(e){ $("eraseBtn").disabled = false; alert("エラー: " + (e && e.message ? e.message : e)); }).adminErasePrivate(KEY);
+  });
 
   function setStatus(s){
     if (!CUR) return;

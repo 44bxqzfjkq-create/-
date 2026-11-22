@@ -482,6 +482,50 @@ function adminSetStatus(key, receiptNo, status) {
   return { ok: true, status: status };
 }
 
+// ===== ボタン1つで、完了した注文の個人情報を消す =====
+// 消す：代行アカウント（メアド・パスワード）と支払いの写真
+// 残す：受付日時・受付番号・依頼者・メニュー・金額など（売上の記録は、税金の申告のために残す必要があるため）
+// メアドは、元に戻せない記号（ハッシュ）にして残す → リピートの集計だけは今まで通りできる
+var ERASED = "（削除済み）";
+
+function accountHash(key) {
+  if (!key) return "";
+  var bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, "daiko:" + key, Utilities.Charset.UTF_8);
+  return bytes.slice(0, 8).map(function (b) { return ("0" + (b & 255).toString(16)).slice(-2); }).join("");
+}
+
+function erasePrivateData(sheet) {
+  var last = sheet.getLastRow(), n = 0;
+  if (last < 2) return 0;
+  var v = sheet.getRange(2, 1, last - 1, CONFIG.HEADER.length).getValues();
+  for (var i = 0; i < v.length; i++) {
+    if (normStatus(v[i][col("ステータス") - 1]) !== "完了") continue;
+    var contact = String(v[i][col("連絡先") - 1] || "");
+    var photo = String(v[i][col("支払い写真") - 1] || "");
+    if (contact.indexOf(ERASED) === 0 && (!photo || photo === ERASED)) continue; // 消し済み
+    var row = i + 2;
+    if (contact.indexOf(ERASED) !== 0) {
+      var h = accountHash(accountKey(contact));
+      sheet.getRange(row, col("連絡先")).setValue(ERASED + (h ? "#" + h : ""));
+    }
+    if (photo && photo !== ERASED) {
+      var m = /\/d\/([\w-]+)/.exec(photo) || /[?&]id=([\w-]+)/.exec(photo);
+      if (m) { try { DriveApp.getFileById(m[1]).setTrashed(true); } catch (e) { Logger.log("写真をゴミ箱に入れられませんでした: " + e); } }
+      sheet.getRange(row, col("支払い写真")).setValue(ERASED);
+    }
+    n++;
+  }
+  return n;
+}
+
+/** 管理ページの「🧹 完了した注文の個人情報を消す」ボタン */
+function adminErasePrivate(key) {
+  if (!isAdmin(key)) return { ok: false };
+  var sheet = ordersSheet();
+  var n = lockRun(function () { return erasePrivateData(sheet); });
+  return { ok: true, count: n };
+}
+
 function adminSendLine(key, receiptNo, text) {
   if (!isAdmin(key)) return { ok: false };
   text = String(text || "").trim();
