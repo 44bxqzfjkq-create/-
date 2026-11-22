@@ -71,6 +71,11 @@
         </div>
       </div>
     </div>
+    <div style="margin-top:28px;padding:12px;border:1px solid #f1b0a8;border-radius:10px;background:#fff6f5">
+      <div class="hint">⚠️ 危険な操作（元に戻せません）</div>
+      <div class="btns"><button id="wipeBtn" style="background:#c0392b">⚠️ すべての記録を削除</button></div>
+      <div class="hint">注文・売上・LINE記録・口コミ・AI朝礼をすべて消します。進行中の注文があるときは消せません。</div>
+    </div>
   </div>
 </div>
 
@@ -200,6 +205,18 @@
       if (r && r.ok) { alert(r.count ? r.count + "件の個人情報を消しました。" : "消すものはありませんでした。"); refresh(); }
       else alert("消せませんでした。");
     }).withFailureHandler(function(e){ $("eraseBtn").disabled = false; alert("エラー: " + (e && e.message ? e.message : e)); }).adminErasePrivate(KEY);
+  });
+
+  $("wipeBtn").addEventListener("click", function(){
+    if (!confirm("⚠️ 注文・売上・LINE記録・口コミ・AI朝礼など、今までの記録をすべて消します。\n支払いの写真もゴミ箱に入ります。\n元に戻せません。売上の記録が必要なら、先にダウンロードしてください。\n続けますか？")) return;
+    var p = prompt("本当に消すなら「すべて削除」と入力してください");
+    if (p === null) return;
+    $("wipeBtn").disabled = true;
+    google.script.run.withSuccessHandler(function(r){
+      $("wipeBtn").disabled = false;
+      if (r && r.ok) { alert("すべての記録を消しました（注文 " + r.orders + "件・写真 " + r.photos + "枚）。"); CUR = ""; $("panel").style.display = "none"; $("empty").style.display = "block"; refresh(); }
+      else alert("消せませんでした：" + ((r && r.reason) || ""));
+    }).withFailureHandler(function(e){ $("wipeBtn").disabled = false; alert("エラー: " + (e && e.message ? e.message : e)); }).adminWipeAll(KEY, p);
   });
 
   function setStatus(s){

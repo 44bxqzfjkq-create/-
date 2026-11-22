@@ -526,6 +526,57 @@ function adminErasePrivate(key) {
   return { ok: true, count: n };
 }
 
+// ===== すべての記録を消す（取り返しがつかないので、何重にも確認する）=====
+var WIPE_PHRASE = "すべて削除";
+
+/** 管理ページの「⚠️ すべての記録を削除」ボタン */
+function adminWipeAll(key, phrase) {
+  if (!isAdmin(key)) return { ok: false, reason: "パスワードが違います。" };
+  if (String(phrase || "").trim() !== WIPE_PHRASE) return { ok: false, reason: "確認の文字が違います。「" + WIPE_PHRASE + "」と入力してください。" };
+  var sheet = ordersSheet();
+  var last = sheet.getLastRow();
+  var v = last >= 2 ? sheet.getRange(2, 1, last - 1, MSG_ID_COL).getValues() : [];
+  var busy = v.filter(function (r) { return r[col("受付番号") - 1] && normStatus(r[col("ステータス") - 1]) !== "完了"; }).length;
+  if (busy) return { ok: false, reason: "進行中の注文が" + busy + "件あります。お客さんに迷惑がかからないよう、全部「完了」にしてから消してください。" };
+
+  var counts = lockRun(function () {
+    var c = { orders: 0, photos: 0 };
+    // 注文：Discordの依頼メッセージと支払いの写真も一緒に消す
+    for (var i = 0; i < v.length; i++) {
+      if (!v[i][col("受付番号") - 1]) continue;
+      c.orders++;
+      var msgId = String(v[i][MSG_ID_COL - 1] || "");
+      if (msgId) {
+        var url = discordUrl(isPriorityMenu(v[i][col("希望メニュー") - 1]));
+        if (url) { try { UrlFetchApp.fetch(url + "/messages/" + msgId, { method: "delete", muteHttpExceptions: true }); } catch (e) {} }
+      }
+    }
+    try {
+      var it = DriveApp.getFoldersByName(CONFIG.PHOTO_FOLDER_NAME);
+      while (it.hasNext()) { var files = it.next().getFiles(); while (files.hasNext()) { files.next().setTrashed(true); c.photos++; } }
+    } catch (e) { Logger.log("写真をゴミ箱に入れられませんでした: " + e); }
+    clearSheetBody(sheet);
+    // そのほかの記録のシート
+    ["LINE記録", "担当者行きログ", "口コミ", "AI朝礼", "ツムツム予定"].forEach(function (name) {
+      var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(name);
+      if (sh) clearSheetBody(sh);
+    });
+    try { PropertiesService.getDocumentProperties().deleteAllProperties(); } catch (e) {} // 口コミ待ちなどの印
+    return c;
+  });
+  notifyAdmin("🗑 管理ページから、すべての記録を削除しました（注文 " + counts.orders + "件・写真 " + counts.photos + "枚）。\n心当たりがなければ、すぐに ADMIN_KEY を変えてください。");
+  return { ok: true, orders: counts.orders, photos: counts.photos };
+}
+
+/** 見出し（1行目）を残して、中身と色を消す */
+function clearSheetBody(sh) {
+  var last = sh.getLastRow(), lastCol = Math.max(sh.getLastColumn(), 1);
+  if (last < 2) return;
+  var r = sh.getRange(2, 1, last - 1, lastCol);
+  r.clearContent();
+  try { r.setBackground(null); } catch (e) {}
+}
+
 function adminSendLine(key, receiptNo, text) {
   if (!isAdmin(key)) return { ok: false };
   text = String(text || "").trim();

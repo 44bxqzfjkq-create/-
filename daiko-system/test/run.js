@@ -65,7 +65,7 @@ function makeEnv(props) {
     console, Logger: { log: (m) => logs.push(String(m)) },
     PropertiesService: {
       getScriptProperties: () => ({ getProperty: (k) => (k in props ? props[k] : null) }),
-      getDocumentProperties: () => ({ getProperty: (k) => (k in docStore ? docStore[k] : null), setProperty: (k, v) => { docStore[k] = v; }, deleteProperty: (k) => { delete docStore[k]; } })
+      getDocumentProperties: () => ({ getProperty: (k) => (k in docStore ? docStore[k] : null), setProperty: (k, v) => { docStore[k] = v; }, deleteProperty: (k) => { delete docStore[k]; }, deleteAllProperties: () => { Object.keys(docStore).forEach(k => delete docStore[k]); } })
     },
     CacheService: { getScriptCache: () => ({
       get: (k) => (k in cacheStore ? cacheStore[k] : null),
@@ -680,12 +680,44 @@ const discordCalls = (env) => env.fetchLog.filter(c => c.url.indexOf("discord.te
     assert.strictEqual(String(sheet().getRange(rowOf(working), 7).getValue()), "busy@x.com:pass3", "代行中の注文まで消した");
     assert.strictEqual(env.run("adminErasePrivate")("adminpw").count, 0, "2回目は何も消さない");
   });
+  test("すべて削除：パスワードと確認の文字が必要／進行中の注文があると消せない", () => {
+    assert.strictEqual(env.run("adminWipeAll")("bad", "すべて削除").ok, false);
+    assert.strictEqual(env.run("adminWipeAll")("adminpw", "すべて").ok, false, "確認の文字が違うのに消した");
+    const r = env.run("adminWipeAll")("adminpw", "すべて削除");
+    assert.strictEqual(r.ok, false); assert.ok(r.reason.indexOf("進行中") >= 0, r.reason);
+    assert.ok(JSON.stringify(sheet().data).indexOf("busy@x.com") >= 0, "断ったのに消した");
+  });
   test("消したあとも、同じゲームアカウントの再注文はリピートとして数えられる", () => {
     const again = order("same@x.com:newpass");
     // フォームの受付日時は日本時間の文字で入るので、テスト環境（日本時間ではない）とずれないよう少し先の時刻で数える
     const s = env.run("weeklyStats")(new Date(Date.now() + 10 * 3600000));
     assert.strictEqual(s.repeatCustomers, 1, JSON.stringify(s));
     assert.strictEqual(s.newCustomers, 3);
+  });
+}
+
+{
+  test("すべて削除：注文・LINE記録・口コミ・AI朝礼などを消して、Discordの依頼も消し、必ず知らせる", () => {
+    const env = makeEnv(BASE_PROPS);
+    env.run("setup")();
+    const o = env.run("submitOrder")({ selected: ["BAN保証"], requester: "花子", amount: 300, contact: "w@x.com:pw", note: "", image: IMG });
+    env.run("BOT_STATE").replied = false; env.run("handleTextMessage")("UW", "rt", o.lineText);
+    env.run("upsertLineRecord")("UW", "花子", { summary: "注文", status: "担当者待ち" });
+    env.sheets["口コミ"].appendRow([new Date(), "花子", "よかった", "OK", "UW"]);
+    env.run("notifyStaff")("花子", [], "質問", "テスト");
+    env.docStore["review_UW"] = String(Date.now());
+    env.run("adminSetStatus")("adminpw", o.receiptNo, "完了");
+    const del = discordCalls(env).filter(c => c.method === "delete").length;
+    const r = env.run("adminWipeAll")("adminpw", " すべて削除 ");
+    assert.strictEqual(r.ok, true, JSON.stringify(r)); assert.strictEqual(r.orders, 1);
+    ["受付", "LINE記録", "口コミ", "担当者行きログ"].forEach(n => {
+      const sh = env.sheets[n];
+      assert.strictEqual(sh.getLastRow(), 1, n + " が消えていない");
+      assert.ok(String(sh.getRange(1, 1).getValue()), n + " の見出しまで消えた");
+    });
+    assert.strictEqual(Object.keys(env.docStore).length, 0);
+    assert.ok(discordCalls(env).some(c => c.body && c.body.content && c.body.content.indexOf("すべての記録を削除しました") >= 0), "知らせがない");
+    assert.ok(discordCalls(env).filter(c => c.method === "delete").length >= del, "Discordの依頼メッセージを消していない");
   });
 }
 
