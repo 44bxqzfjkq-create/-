@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <base target="_top" />
+    <meta charset="utf-8" />
+    <style>
+      :root{--bg:#f5f6f8;--card:#fff;--line:#e3e6ea;--text:#1f2933;--sub:#66727f;--accent:#2f7d32;--accent-d:#266a29;--danger:#c0392b;}
+      *{box-sizing:border-box;}
+      body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;line-height:1.6;}
+      .wrap{max-width:480px;margin:0 auto;padding:16px 14px 40px;}
+      h1{font-size:20px;margin:8px 4px 4px;}
+      .lead{color:var(--sub);font-size:13px;margin:0 4px 16px;}
+      .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;}
+      .field{margin-bottom:16px;}
+      label{display:block;font-size:14px;font-weight:600;margin-bottom:6px;}
+      label .req{color:var(--danger);font-size:12px;margin-left:4px;}
+      label .opt{color:var(--sub);font-size:12px;margin-left:4px;}
+      input[type=text],input[type=number],textarea{width:100%;padding:12px;font-size:16px;border:1px solid var(--line);border-radius:8px;background:#fff;color:var(--text);}
+      textarea{min-height:80px;resize:vertical;}
+      .hint{font-size:12px;color:var(--sub);margin-top:6px;}
+      .menu-row{display:flex;align-items:center;gap:10px;padding:11px 12px;border:1px solid var(--line);border-radius:8px;margin-bottom:8px;font-size:15px;cursor:pointer;}
+      .menu-row input[type=checkbox]{width:20px;height:20px;flex:0 0 auto;}
+      .receipt-note{background:#eef6ee;border:1px dashed #b7d7b8;color:var(--accent-d);border-radius:8px;padding:10px 12px;font-size:13px;}
+      .pay-btn,.line-btn{display:block;text-align:center;padding:13px;background:#06c755;color:#fff;border-radius:8px;text-decoration:none;font-weight:700;}
+      button{width:100%;padding:14px;font-size:16px;font-weight:700;color:#fff;background:var(--accent);border:none;border-radius:10px;cursor:pointer;}
+      button:disabled{opacity:.6;cursor:default;}
+      .msg{margin-top:14px;font-size:14px;}
+      .msg.error{color:var(--danger);}
+      .err{color:var(--danger);font-size:13px;}
+      .done{text-align:center;padding:20px 12px;}
+      .done .big{font-size:16px;font-weight:800;margin:10px 0;color:var(--accent-d);}
+      .done .num{display:inline-block;background:#eef6ee;border-radius:8px;padding:6px 14px;font-size:20px;font-weight:800;}
+      .step{margin:16px 0 12px;text-align:left;background:#fff8e1;border:1px solid #ffe0a3;border-radius:8px;padding:12px;font-size:14px;}
+      .sub-note{margin-top:14px;text-align:left;font-size:12px;color:var(--sub);}
+      #lineTextBox{margin:6px 0 8px;font-size:13px;}
+      .link{display:inline-block;margin-top:18px;color:var(--accent-d);font-size:14px;text-decoration:underline;cursor:pointer;}
+      img#preview{max-width:100%;margin-top:10px;border:1px solid var(--line);border-radius:8px;}
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1><?= appTitle ?></h1>
+      <p class="lead">ご希望内容をご記入ください。<br />※記入後受付が完了します。</p>
+
+      <div class="card" id="formCard">
+        <div class="field">
+          <label>受付番号</label>
+          <div class="receipt-note">送信後に自動で発行されます（例: T-YYYYMMDD-001）。</div>
+        </div>
+
+        <div class="field">
+          <label for="requester">ご依頼者（LINEの表示名）<span class="req">必須</span></label>
+          <input id="requester" type="text" placeholder="LINEの表示名を入力してください" />
+        </div>
+
+        <div class="field">
+          <label>ご希望の商品<span class="req">必須</span></label>
+          <div id="menuList"></div>
+          <div class="hint">ほしい商品にチェックを入れてください（複数OK）。</div>
+        </div>
+
+        <div class="field">
+          <label for="amount">合計金額<span class="req">必須</span></label>
+          <input id="amount" type="number" inputmode="numeric" min="0" step="1" value="0" />
+          <div class="hint">選んだ商品の合計が自動計算されます（手入力で変更可）。</div>
+        </div>
+
+        <div class="field">
+          <p class="hint" style="font-size:14px; color:#1f2933; margin-bottom:8px;">
+            PayPayを開く → アプリ内で「送る」→ ID rina_2f を検索 送金
+          </p>
+          <a class="pay-btn" href="https://paypay.ne.jp/" target="_blank" rel="noopener">お支払いはこちら</a>
+        </div>
+
+        <div class="field">
+          <label for="contact">代行するアカウント<span class="req">必須</span></label>
+          <input id="contact" type="text" placeholder="LINEのメールアドレス:パスワード" />
+        </div>
+
+        <div class="field">
+          <label for="note">備考<span class="opt">任意</span></label>
+          <textarea id="note" placeholder="ご要望・ご質問など"></textarea>
+        </div>
+
+        <div class="field">
+          <label for="photo">支払いの写真<span class="opt" id="photoOpt">任意</span></label>
+          <input id="photo" type="file" accept="image/*" />
+          <div class="hint">送金のスクショなど。送信前に自動で縮小されます。</div>
+          <img id="preview" alt="プレビュー" style="display:none" />
+        </div>
+
+        <button id="submitBtn" onclick="onSubmit()">送信する</button>
+        <div class="msg" id="msg"></div>
+      </div>
+
+      <div class="card done" id="doneCard" style="display:none">
+        <div>ご注文を受け付けました ✅</div>
+        <div class="big">受付番号</div>
+        <div class="num" id="doneNo">-</div>
+
+        <div class="step">
+          <b>あと1ステップです！</b><br />
+          下のボタンを押してLINEを開き、そのまま<b>送信</b>してください。<br />
+          これで受付が完了し、進み具合や納品のお知らせがLINEに届きます。
+        </div>
+
+        <a class="line-btn" id="lineBtn" href="#" target="_blank" rel="noopener" style="display:none">LINEで受付を完了する</a>
+
+        <div class="sub-note">
+          ボタンでLINEが開かないときは、下の文章をコピーして、公式LINEに送ってください。
+          <input id="lineTextBox" type="text" readonly />
+          <button type="button" onclick="copyLine()">文章をコピー</button>
+          <div id="copyMsg" style="font-size:12px;color:#2f7d32;margin-top:6px;"></div>
+        </div>
+
+        <span class="link" onclick="resetForm()">続けて入力する</span>
+      </div>
+    </div>
+
+    <script id="menusData" type="application/json"><?!= menusJson ?></script>
+    <script id="reqPhotoData" type="application/json"><?!= requirePhoto ?></script>
+    <script>
+      var MENUS = {};
+      var REQUIRE_PHOTO = false;
+      try { MENUS = JSON.parse(document.getElementById("menusData").textContent || "{}"); } catch (e) {}
+      try { REQUIRE_PHOTO = JSON.parse(document.getElementById("reqPhotoData").textContent || "false"); } catch (e) {}
+
+      var photoData = null;
+
+      (function(){
+        var list = document.getElementById("menuList");
+        var keys = Object.keys(MENUS);
+        if (!keys.length) { list.innerHTML = '<div class="err">※商品が読み込めませんでした。</div>'; return; }
+        keys.forEach(function(n){
+          var price = Number(MENUS[n]) || 0;
+          var row = document.createElement("label"); row.className = "menu-row";
+          var cb = document.createElement("input");
+          cb.type = "checkbox"; cb.value = n; cb.className = "menuChk"; cb.setAttribute("data-price", price);
+          cb.addEventListener("change", recalc);
+          var span = document.createElement("span");
+          span.textContent = n + (price > 0 ? "　¥" + price : "");
+          row.appendChild(cb); row.appendChild(span); list.appendChild(row);
+        });
+      })();
+
+      if (REQUIRE_PHOTO) { var po = document.getElementById("photoOpt"); po.textContent = "必須"; po.className = "req"; }
+
+      function recalc(){
+        var chks = document.querySelectorAll(".menuChk"); var sum = 0;
+        for (var i = 0; i < chks.length; i++) { if (chks[i].checked) sum += Number(chks[i].getAttribute("data-price")) || 0; }
+        document.getElementById("amount").value = sum;
+      }
+
+      document.getElementById("photo").addEventListener("change", function(e){
+        var file = e.target.files && e.target.files[0]; photoData = null;
+        var preview = document.getElementById("preview"); preview.style.display = "none"; setMsg("");
+        if (!file) return;
+        var reader = new FileReader();
+        reader.onload = function(ev){
+          var original = ev.target.result;
+          photoData = { dataUrl: original, name: file.name || "payment" };
+          var img = new Image();
+          img.onload = function(){
+            try {
+              var MAX = 1600, w = img.width, h = img.height;
+              if (w > MAX || h > MAX) { if (w >= h) { h = Math.round(h*MAX/w); w = MAX; } else { w = Math.round(w*MAX/h); h = MAX; } }
+              var c = document.createElement("canvas"); c.width = w; c.height = h;
+              c.getContext("2d").drawImage(img, 0, 0, w, h);
+              var dataUrl = c.toDataURL("image/jpeg", 0.8);
+              photoData = { dataUrl: dataUrl, name: (file.name || "payment") + ".jpg" };
+              preview.src = dataUrl; preview.style.display = "block";
+            } catch (err) { setMsg("写真は添付できました（プレビュー不可）。", false); }
+          };
+          img.onerror = function(){ setMsg("写真は添付できました（プレビュー不可）。", false); };
+          img.src = original;
+        };
+        reader.readAsDataURL(file);
+      });
+
+      function setMsg(t, err){ var m = document.getElementById("msg"); m.textContent = t || ""; m.className = "msg" + (err ? " error" : ""); }
+
+      function onSubmit(){
+        var chks = document.querySelectorAll(".menuChk");
+        var selected = [];
+        for (var i = 0; i < chks.length; i++) { if (chks[i].checked) selected.push(chks[i].value); }
+        var input = {
+          selected: selected,
+          requester: document.getElementById("requester").value,
+          amount: document.getElementById("amount").value,
+          contact: document.getElementById("contact").value,
+          note: document.getElementById("note").value,
+          image: photoData
+        };
+        if (!selected.length) { setMsg("商品を1つ以上選んでください。", true); return; }
+        if (!input.requester.trim()) { setMsg("ご依頼者（LINE表示名）を入力してください。", true); return; }
+        if (!input.contact.trim()) { setMsg("代行するアカウントを入力してください。", true); return; }
+        if (REQUIRE_PHOTO && !photoData) { setMsg("支払いの写真を添付してください。", true); return; }
+
+        var btn = document.getElementById("submitBtn"); btn.disabled = true; btn.textContent = "送信中..."; setMsg("");
+        google.script.run
+          .withSuccessHandler(function(res){
+            if (res && res.ok) {
+              document.getElementById("doneNo").textContent = res.receiptNo;
+              document.getElementById("lineTextBox").value = res.lineText;
+              var lb = document.getElementById("lineBtn");
+              if (res.lineUrl) { lb.href = res.lineUrl; lb.style.display = "block"; } else { lb.style.display = "none"; }
+              document.getElementById("formCard").style.display = "none";
+              document.getElementById("doneCard").style.display = "block";
+              window.scrollTo(0,0);
+            } else {
+              setMsg((res && res.message) || "送信に失敗しました。", true);
+              btn.disabled = false; btn.textContent = "送信する";
+            }
+          })
+          .withFailureHandler(function(err){ setMsg("通信エラー: " + (err && err.message ? err.message : err), true); btn.disabled = false; btn.textContent = "送信する"; })
+          .submitOrder(input);
+      }
+
+      function copyLine(){
+        var box = document.getElementById("lineTextBox");
+        box.focus(); box.select(); box.setSelectionRange(0, 99999);
+        var ok = false; try { ok = document.execCommand("copy"); } catch (e) {}
+        document.getElementById("copyMsg").textContent = ok
+          ? "コピーしました。公式LINEのトークに貼り付けて送信してください ✅"
+          : "文章を長押ししてコピーし、公式LINEに送ってください。";
+      }
+
+      function resetForm(){
+        var chks = document.querySelectorAll(".menuChk");
+        for (var i = 0; i < chks.length; i++) chks[i].checked = false;
+        document.getElementById("requester").value = "";
+        document.getElementById("amount").value = 0;
+        document.getElementById("contact").value = "";
+        document.getElementById("note").value = "";
+        document.getElementById("photo").value = ""; document.getElementById("preview").style.display = "none"; photoData = null;
+        document.getElementById("doneCard").style.display = "none"; document.getElementById("formCard").style.display = "block";
+        setMsg(""); var btn = document.getElementById("submitBtn"); btn.disabled = false; btn.textContent = "送信する";
+      }
+    </script>
+  </body>
+</html>
