@@ -17,7 +17,8 @@ function test(name, fn) {
 }
 
 // ---------------- 仮のGoogle部品 ----------------
-function makeEnv(props) {
+function makeEnv(props, opts) {
+  opts = opts || {};
   const logs = [];
   const fetchLog = [];
   const aiQueue = [];            // Claudeの返事（先頭から使う）
@@ -125,7 +126,7 @@ function makeEnv(props) {
     }
   };
   vm.createContext(ctx);
-  for (const f of ["Manual.gs", "FixedReplies.gs", "Code.gs", "Bot.gs", "AiStaff.gs"]) {
+  for (const f of ["Manual.gs", "FixedReplies.gs", "Code.gs", "Bot.gs", "AiStaff.gs"].filter(f => !(opts.skip || []).includes(f))) {
     vm.runInContext(fs.readFileSync(path.join(root, f), "utf8"), ctx, { filename: f });
   }
   const run = (code) => vm.runInContext(code, ctx);
@@ -901,6 +902,19 @@ const discordCalls = (env) => env.fetchLog.filter(c => c.url.indexOf("discord.te
     env.run("BOT_STATE").replied = false; env.run("handleTextMessage")("U1", "rt", "こんにちは");
     assert.strictEqual(aiCalls(env)[0].headers["x-api-key"], "KEY");
     assert.strictEqual(lineCalls(env, "reply")[0].headers.Authorization, "Bearer TOKEN");
+  });
+  test("FixedReplies.gs が読み込めなくても、ボットは止まらず、管理者に1回だけ知らせる", () => {
+    const env = makeEnv(BASE_PROPS, { skip: ["FixedReplies.gs"] }); env.run("setup")(); // FixedReplies.gs を貼り忘れた状態
+    assert.strictEqual(env.run("typeof FIXED_REPLIES"), "undefined");
+    env.aiQueue.push({ text: JSON.stringify({ reply: "料金は200円からです", need_staff: false, closing: false, summary: "料金" }) });
+    env.aiQueue.push({ text: JSON.stringify({ reply: "はい", need_staff: false, closing: false, summary: "x" }) });
+    post(env, "secretkey", [msg("U1", "料金", "fr1")]);
+    post(env, "secretkey", [msg("U1", "流れ", "fr2")]);
+    const replies = lineCalls(env, "reply").map(c => c.body.messages[0].text);
+    assert.strictEqual(replies[0], "料金は200円からです", "止まってしまった: " + replies[0]);
+    const warns = discordCalls(env).filter(c => c.body && c.body.content && c.body.content.indexOf("FixedReplies.gs が読み込めていません") >= 0);
+    assert.strictEqual(warns.length, 1, "知らせが1回ではない");
+    assert.ok(!discordCalls(env).some(c => c.body && c.body.content && c.body.content.indexOf("エラーが起きました") >= 0), "エラーになっている");
   });
   test("checkSecrets：足りない設定を教える（中身は表示しない）", () => {
     const env = makeEnv({ LINE_TOKEN: "SECRETVALUE" });

@@ -183,6 +183,14 @@ function buildAchievements() {
   return out.join("\n\n");
 }
 
+/** 必要なファイルが読み込めていないことを、管理者に知らせる（6時間に1回まで）*/
+function warnMissingFile(name) {
+  var cache = CacheService.getScriptCache();
+  if (cache.get("missing_" + name)) return;
+  cache.put("missing_" + name, "1", 21600);
+  notifyAdmin("⚠️ " + name + " が読み込めていません。Apps Scriptで、このファイルがあるか・中身が正しいかを確認して、貼り直してからデプロイ（新バージョン）してください。ボットは、決まった返事の代わりにAIで返事を続けています。");
+}
+
 /** Discordで@everyoneなどが動かないようにする */
 function noMention(s) { return String(s || "").replace(/@/g, "＠"); }
 
@@ -247,6 +255,10 @@ function isProgressRequest(text) {
 function matchFixedReply(text) {
   var key = normalizeText(text).toLowerCase();
   if (!key) return null;
+  if (typeof FIXED_REPLIES === "undefined") { // FixedReplies.gs が消えた・中身が違うときも、ボットは止めない
+    warnMissingFile("FixedReplies.gs");
+    return null;
+  }
   for (var k in FIXED_REPLIES) {
     if (!Object.prototype.hasOwnProperty.call(FIXED_REPLIES, k)) continue;
     if (normalizeText(k).toLowerCase() !== key) continue;
